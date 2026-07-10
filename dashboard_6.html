@@ -1,0 +1,1046 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Дашборд — аналітика перевірки</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f0; color: #1a1a1a; min-height: 100vh; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
+
+    .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+    .topbar h1 { font-size: 22px; font-weight: 600; }
+    .topbar .actions { display: flex; gap: 8px; }
+    .btn { padding: 8px 14px; border-radius: 8px; border: 1px solid #ccc; background: #fff; font-size: 13px; cursor: pointer; }
+    .btn:hover { background: #f0f0f0; }
+    .btn.primary { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+
+    /* Settings */
+    .settings { background: #fff; border: 1px solid #e0e0d8; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .settings summary { font-size: 13px; color: #666; cursor: pointer; padding: 4px 0; list-style: none; }
+    .settings summary::before { content: '⚙ '; }
+    .settings input { width: 100%; margin-top: 8px; padding: 10px; background: #fafaf7; border: 1px solid #ccc; border-radius: 8px; font-size: 13px; font-family: monospace; }
+    .settings .btns { display: flex; gap: 8px; margin-top: 8px; }
+    .settings .btns button { flex: 1; }
+
+    /* Date filter */
+    .filters { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+    .filter-btn { padding: 6px 14px; border-radius: 8px; border: 1px solid #ccc; background: #fff; font-size: 13px; cursor: pointer; }
+    .filter-btn.active { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+    .filter-pick { padding: 6px 10px; border-radius: 8px; border: 1px solid #ccc; background: #fff; font-size: 13px; min-width: 140px; }
+
+    /* Searchable dropdown */
+    .search-select { position: relative; display: inline-block; min-width: 220px; }
+    .search-select-input { width: 100%; padding: 6px 30px 6px 10px; border: 1px solid #ccc; border-radius: 8px; background: #fff; font-size: 13px; }
+    .search-select-input:focus { outline: none; border-color: #378ADD; }
+    .search-select-clear { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #999; cursor: pointer; font-size: 16px; padding: 0; width: 20px; height: 20px; line-height: 1; display: none; }
+    .search-select-clear.visible { display: block; }
+    .search-select-clear:hover { color: #333; }
+    .search-select-list { position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #ccc; border-radius: 8px; margin-top: 3px; max-height: 320px; overflow-y: auto; z-index: 100; display: none; box-shadow: 0 6px 20px rgba(0,0,0,0.12); }
+    .search-select-list.open { display: block; }
+    .search-select-option { padding: 8px 12px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #f5f5f0; display: flex; align-items: center; gap: 8px; }
+    .search-select-option:last-child { border-bottom: none; }
+    .search-select-option:hover { background: #eff6ff; }
+    .search-select-option.all { font-weight: 600; color: #666; }
+    .search-select-option .opt-name { flex: 1; }
+    .search-select-option .opt-id { color: #999; font-size: 11px; }
+    .search-select-option .opt-dept { color: #666; font-size: 11px; padding: 2px 6px; background: #f0f0f0; border-radius: 4px; white-space: nowrap; }
+    .search-select-empty { padding: 16px; color: #999; text-align: center; font-size: 13px; }
+
+    /* KPIs */
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .kpi { background: #fff; border: 1px solid #e0e0d8; border-radius: 12px; padding: 16px; }
+    .kpi-label { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+    .kpi-value { font-size: 28px; font-weight: 700; margin-top: 6px; }
+    .kpi.ok  .kpi-value { color: #16a34a; }
+    .kpi.bad .kpi-value { color: #dc2626; }
+    .kpi.warn .kpi-value { color: #ea580c; }
+
+    /* Charts grid */
+    .row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 24px; }
+    .row.one { grid-template-columns: 1fr; }
+    @media (max-width: 768px) {
+      .row { grid-template-columns: 1fr; }
+    }
+    .card { background: #fff; border: 1px solid #e0e0d8; border-radius: 12px; padding: 20px; }
+    .card h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+    .card .chart-wrap { position: relative; height: 280px; }
+
+    /* Tables */
+    .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .data-table th { text-align: left; padding: 8px; font-weight: 500; font-size: 12px; color: #666; border-bottom: 1px solid #e8e8e0; }
+    .data-table td { padding: 8px; border-bottom: 1px solid #f0f0e8; }
+    .data-table tr:hover td { background: #fafaf7; }
+    .bar { display: inline-block; height: 6px; background: #1a1a1a; border-radius: 3px; vertical-align: middle; margin-right: 6px; min-width: 1px; }
+    .bar.bad { background: #dc2626; }
+    .bar.ok { background: #16a34a; }
+
+    .pct { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+    .pct.low  { background: #d1fae5; color: #065f46; }
+    .pct.med  { background: #fef3c7; color: #92400e; }
+    .pct.high { background: #fee2e2; color: #991b1b; }
+
+    .status-cell { display: inline-block; padding: 2px 10px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+    .status-ok  { background: #d1fae5; color: #065f46; }
+    .status-bad { background: #fee2e2; color: #991b1b; }
+
+    .del-btn { background: transparent; border: 1px solid #ddd; color: #999; padding: 4px 8px; border-radius: 6px; font-size: 11px; cursor: pointer; margin-left: 4px; }
+    .del-btn:hover { background: #fee2e2; color: #991b1b; border-color: #dc2626; }
+    .move-btn { border-color: #ddd; color: #666; }
+    .move-btn:hover { background: #dbeafe; color: #1e40af; border-color: #3b82f6; }
+
+    .empty { padding: 32px; text-align: center; color: #999; font-size: 13px; }
+    .loading { text-align: center; padding: 60px 20px; color: #888; }
+
+    .badge-ts { font-family: monospace; font-size: 12px; color: #666; }
+
+    .status-line { padding: 8px 12px; border-radius: 8px; font-size: 13px; margin-top: 8px; }
+    .status-line.ok  { background: #d1fae5; color: #065f46; }
+    .status-line.err { background: #fee2e2; color: #991b1b; }
+    .status-line.idle { background: #f5f5f0; color: #666; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <div class="topbar">
+    <h1>📊 Аналітика перевірки</h1>
+    <div class="actions">
+      <button class="btn" onclick="loadData()">🔄 Оновити</button>
+      <button class="btn" onclick="exportCSV()">⬇ Експорт CSV</button>
+    </div>
+  </div>
+
+  <details class="settings">
+    <summary>Налаштування підключення</summary>
+    <input type="text" id="webhook" placeholder="https://script.google.com/macros/s/.../exec" />
+    <div class="btns">
+      <button class="btn primary" onclick="saveWebhook()">Зберегти URL</button>
+    </div>
+    <div class="status-line idle" id="settings-status">Введи URL веб-хуку та натисни Зберегти</div>
+  </details>
+
+  <div class="filters">
+    <span style="font-size:13px;color:#666;margin-right:4px;">Період:</span>
+    <button class="filter-btn" onclick="setDateRange('today')" id="f-today">Сьогодні</button>
+    <button class="filter-btn" onclick="setDateRange('7d')" id="f-7d">7 днів</button>
+    <button class="filter-btn" onclick="setDateRange('30d')" id="f-30d">30 днів</button>
+    <button class="filter-btn active" onclick="setDateRange('all')" id="f-all">Все</button>
+
+    <span style="font-size:13px;color:#666;margin-left:12px;margin-right:4px;">Тип:</span>
+    <select class="filter-pick" id="filter-type" onchange="render()">
+      <option value="">Всі</option>
+      <option value="component">Комплектуючі</option>
+      <option value="process">Процеси</option>
+    </select>
+
+    <span style="font-size:13px;color:#666;margin-left:12px;margin-right:4px;">Відділ:</span>
+    <select class="filter-pick" id="filter-department" onchange="render()">
+      <option value="">Всі</option>
+    </select>
+
+    <span style="font-size:13px;color:#666;margin-left:12px;margin-right:4px;">Працівник:</span>
+    <div class="search-select" id="worker-search-wrap">
+      <input type="text" class="search-select-input" id="worker-search-input" placeholder="Всі" autocomplete="off">
+      <button class="search-select-clear" id="worker-search-clear" title="Очистити">✕</button>
+      <div class="search-select-list" id="worker-search-list"></div>
+    </div>
+
+    <span style="font-size:13px;color:#666;margin-right:4px;">Позиція:</span>
+    <select class="filter-pick" id="filter-component" onchange="render()">
+      <option value="">Всі</option>
+    </select>
+  </div>
+
+  <div id="content">
+    <div class="loading">Натисни 🔄 Оновити щоб завантажити дані</div>
+  </div>
+
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════════
+// ⚙ URL веб-хука Apps Script.
+// Встав сюди свій URL між лапками — і не треба вводити руками.
+// Залиш порожнім щоб вводити через UI.
+// ══════════════════════════════════════════════════════════════════
+const BUILT_IN_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbz_ndl2BP_YFYAG0KTFrHjvfRhNokDYm_E8d8JMle_q0SQJQ0zC8cqMnm9dST8UE7U/exec';
+// ══════════════════════════════════════════════════════════════════
+
+const state = {
+  webhookUrl: BUILT_IN_WEBHOOK_URL || localStorage.getItem('dashboard_webhook') || '',
+  records: { ok: [], bad: [] },
+  sessions: [],
+  workers: {},
+  workersWithDepts: {},  // { W005: { name, deptId } }
+  departments: {},        // { D01: 'Пайка' }
+  components: {},
+  processes: {},
+  filter: { range: 'all', worker: '', component: '', type: '', department: '', positionSearch: '' },
+  charts: {}
+};
+
+document.getElementById('webhook').value = state.webhookUrl;
+updateSettingsStatus();
+if (state.webhookUrl) loadData();
+
+// Якщо URL вбудовано — ховаємо блок налаштувань
+if (BUILT_IN_WEBHOOK_URL) {
+  const settings = document.querySelector('.settings');
+  if (settings) settings.style.display = 'none';
+}
+
+function saveWebhook() {
+  state.webhookUrl = document.getElementById('webhook').value.trim();
+  localStorage.setItem('dashboard_webhook', state.webhookUrl);
+  updateSettingsStatus();
+  if (state.webhookUrl) loadData();
+}
+
+function updateSettingsStatus() {
+  const el = document.getElementById('settings-status');
+  if (!state.webhookUrl) {
+    el.className = 'status-line idle';
+    el.textContent = 'Введи URL веб-хуку та натисни Зберегти';
+  } else {
+    el.className = 'status-line ok';
+    el.textContent = '✓ URL збережено';
+  }
+}
+
+async function loadData() {
+  if (!state.webhookUrl) {
+    alert('Спочатку введи URL веб-хуку');
+    return;
+  }
+  document.getElementById('content').innerHTML = '<div class="loading">⏳ Завантаження даних...</div>';
+  try {
+    const res = await fetch(state.webhookUrl + '?action=records&limit=5000');
+    const data = await res.json();
+    if (data.status !== 'ok') throw new Error(data.message || 'Помилка');
+    state.records.ok  = data.ok  || [];
+    state.records.bad = data.bad || [];
+    state.sessions   = data.sessions   || [];
+    state.workers    = data.workers    || {};
+    state.workersWithDepts = data.workersWithDepts || {};
+    state.departments = data.departments || {};
+    state.components = data.components || {};
+    state.processes  = data.processes  || {};
+    fillFilters();
+    render();
+  } catch (err) {
+    document.getElementById('content').innerHTML = '<div class="empty">⚠ Помилка завантаження: ' + err.message + '</div>';
+  }
+}
+
+function fillFilters() {
+  const dSel = document.getElementById('filter-department');
+  if (dSel) {
+    const dIds = Object.keys(state.departments).sort();
+    dSel.innerHTML = '<option value="">Всі</option>' +
+      dIds.map(id => '<option value="' + id + '">' + state.departments[id] + '</option>').join('');
+  }
+
+  // Ініціалізуємо searchable dropdown для працівників
+  renderWorkerSearchList('');
+  // Відновлюємо вибраного працівника у input якщо є
+  if (state.filter.worker && state.workers[state.filter.worker]) {
+    const input = document.getElementById('worker-search-input');
+    const clear = document.getElementById('worker-search-clear');
+    input.value = state.workers[state.filter.worker];
+    clear.classList.add('visible');
+  }
+
+  const cSel = document.getElementById('filter-component');
+  const compIds = Object.keys(state.components).sort();
+  const procIds = Object.keys(state.processes).sort();
+  let html = '<option value="">Всі</option>';
+  if (compIds.length) {
+    html += '<optgroup label="Комплектуючі">' +
+      compIds.map(id => '<option value="' + id + '">' + state.components[id] + '</option>').join('') +
+      '</optgroup>';
+  }
+  if (procIds.length) {
+    html += '<optgroup label="Процеси">' +
+      procIds.map(id => '<option value="' + id + '">' + state.processes[id] + '</option>').join('') +
+      '</optgroup>';
+  }
+  cSel.innerHTML = html;
+}
+
+function renderWorkerSearchList(query) {
+  const list = document.getElementById('worker-search-list');
+  if (!list) return;
+  const q = (query || '').toLowerCase().trim();
+  const dept = state.filter.department;
+
+  // Фільтруємо працівників: за відділом і за пошуком
+  const matches = Object.entries(state.workers).filter(([id, name]) => {
+    if (dept) {
+      const wd = state.workersWithDepts[id];
+      if (!wd || wd.deptId !== dept) return false;
+    }
+    if (!q) return true;
+    return id.toLowerCase().includes(q) || name.toLowerCase().includes(q);
+  }).sort((a, b) => a[1].localeCompare(b[1], 'uk'));
+
+  // Формуємо HTML
+  let html = '<div class="search-select-option all" data-id="">— Всі —</div>';
+  if (matches.length === 0) {
+    html += '<div class="search-select-empty">Нікого не знайдено</div>';
+  } else {
+    html += matches.map(([id, name]) => {
+      const wd = state.workersWithDepts[id];
+      const deptName = wd && wd.deptId ? (state.departments[wd.deptId] || '') : '';
+      return `<div class="search-select-option" data-id="${id}">
+        <span class="opt-name">${esc(name)}</span>
+        <span class="opt-id">${id}</span>
+        ${deptName ? `<span class="opt-dept">${esc(deptName)}</span>` : ''}
+      </div>`;
+    }).join('');
+  }
+  list.innerHTML = html;
+
+  // Handlers на кожну опцію
+  list.querySelectorAll('.search-select-option').forEach(el => {
+    el.addEventListener('mousedown', (e) => {
+      e.preventDefault(); // щоб не забирати focus з input перш ніж клікнути
+      selectWorker(el.dataset.id);
+    });
+  });
+}
+
+function selectWorker(id) {
+  state.filter.worker = id;
+  const input = document.getElementById('worker-search-input');
+  const clear = document.getElementById('worker-search-clear');
+  const list = document.getElementById('worker-search-list');
+
+  if (id && state.workers[id]) {
+    input.value = state.workers[id];
+    clear.classList.add('visible');
+  } else {
+    input.value = '';
+    clear.classList.remove('visible');
+  }
+  list.classList.remove('open');
+  input.blur();
+  render();
+}
+
+function setDateRange(range) {
+  state.filter.range = range;
+  ['today','7d','30d','all'].forEach(r => {
+    document.getElementById('f-' + r).className = 'filter-btn' + (r === range ? ' active' : '');
+  });
+  render();
+}
+
+function parseTime(s) {
+  // Format: "DD.MM.YYYY, HH:MM:SS" or "DD.MM.YYYY HH:MM:SS"
+  if (!s) return null;
+  const m = String(s).match(/(\d{1,2})\.(\d{1,2})\.(\d{4})[,\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) {
+    const d = new Date(s);
+    return isNaN(d) ? null : d;
+  }
+  return new Date(+m[3], +m[2]-1, +m[1], +m[4], +m[5], +(m[6]||0));
+}
+
+function inRange(date, range) {
+  if (!date) return false;
+  const now = new Date();
+  if (range === 'all') return true;
+  if (range === 'today') {
+    return date.getFullYear() === now.getFullYear() &&
+           date.getMonth() === now.getMonth() &&
+           date.getDate() === now.getDate();
+  }
+  const days = range === '7d' ? 7 : range === '30d' ? 30 : 999999;
+  const ago = new Date(now.getTime() - days * 24 * 3600 * 1000);
+  return date >= ago;
+}
+
+function filtered() {
+  const f = state.filter;
+  function check(r) {
+    const d = parseTime(r.time);
+    if (!inRange(d, f.range)) return false;
+    if (f.worker && r.workerId !== f.worker) return false;
+    if (f.component && r.componentId !== f.component) return false;
+    if (f.type === 'component' && !state.components[r.componentId]) return false;
+    if (f.type === 'process' && !state.processes[r.componentId]) return false;
+    if (f.department) {
+      const wd = state.workersWithDepts[r.workerId];
+      if (!wd || wd.deptId !== f.department) return false;
+    }
+    return true;
+  }
+  return {
+    ok:  state.records.ok.filter(check).map(r => ({ ...r, _d: parseTime(r.time), _type: 'ok'  })),
+    bad: state.records.bad.filter(check).map(r => ({ ...r, _d: parseTime(r.time), _type: 'bad' }))
+  };
+}
+
+function render() {
+  const f = filtered();
+  const all = [...f.ok, ...f.bad].sort((a, b) => (b._d || 0) - (a._d || 0));
+  const total = f.ok.length + f.bad.length;
+  const defectRate = total ? (f.bad.length / total * 100) : 0;
+  const avgTimes = calculateAvgTimes(all);
+
+  document.getElementById('content').innerHTML = `
+    <div class="kpis">
+      <div class="kpi"><div class="kpi-label">Всього</div><div class="kpi-value">${total}</div></div>
+      <div class="kpi ok"><div class="kpi-label">Прийнято</div><div class="kpi-value">${f.ok.length}</div></div>
+      <div class="kpi bad"><div class="kpi-label">Брак</div><div class="kpi-value">${f.bad.length}</div></div>
+      <div class="kpi ${defectRate > 10 ? 'bad' : defectRate > 3 ? 'warn' : 'ok'}">
+        <div class="kpi-label">% Браку</div>
+        <div class="kpi-value">${defectRate.toFixed(1)}%</div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="card">
+        <h3>Динаміка по днях</h3>
+        <div class="chart-wrap"><canvas id="chart-daily"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Розподіл OK / Брак</h3>
+        <div class="chart-wrap"><canvas id="chart-donut"></canvas></div>
+      </div>
+    </div>
+
+    <div class="row one">
+      <div class="card">
+        <h3>Статистика по днях</h3>
+        ${renderDailyTable(all)}
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="card">
+        <h3>Продуктивність працівників (з часом роботи)</h3>
+        ${renderWorkersTable(f)}
+      </div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap;">
+          <h3 style="margin:0;">Статистика по позиціях</h3>
+          <input type="text" id="positions-search" placeholder="🔍 Пошук по назві або ID..." style="padding:6px 12px;border:1px solid #ccc;border-radius:8px;font-size:13px;min-width:220px;" />
+        </div>
+        ${renderComponentsTable(f, avgTimes)}
+      </div>
+    </div>
+
+    <div class="row one">
+      <div class="card">
+        <h3>Останні записи (${Math.min(50, all.length)}) — можна видаляти помилкові</h3>
+        ${renderRecentTable(all)}
+      </div>
+    </div>
+  `;
+
+  renderDailyChart(f);
+  renderDonutChart(f);
+}
+
+function renderWorkersTable(f) {
+  // Обчислюємо активний час роботи для кожного працівника
+  const sessions = state.sessions
+    .filter(s => {
+      const d = parseTime(s.time);
+      if (!inRange(d, state.filter.range)) return false;
+      if (state.filter.worker && s.workerId !== state.filter.worker) return false;
+      if (state.filter.department) {
+        const wd = state.workersWithDepts[s.workerId];
+        if (!wd || wd.deptId !== state.filter.department) return false;
+      }
+      return true;
+    })
+    .map(s => ({ ...s, _d: parseTime(s.time) }));
+
+  const sessionTotals = computeSessionTotals(sessions);
+
+  // Групуємо процеси/комплектуючі кожного працівника
+  const workerProcesses = {}; // { workerId: { positionId: {count, name} } }
+
+  const byW = {};
+  [...f.ok, ...f.bad].forEach(r => {
+    const k = r.workerId;
+    if (!byW[k]) byW[k] = { name: r.workerName, ok: 0, bad: 0 };
+    if (r._type === 'ok') byW[k].ok++; else byW[k].bad++;
+
+    if (!workerProcesses[k]) workerProcesses[k] = {};
+    if (!workerProcesses[k][r.componentId]) {
+      workerProcesses[k][r.componentId] = { count: 0, name: r.componentName };
+    }
+    workerProcesses[k][r.componentId].count++;
+  });
+
+  const arr = Object.entries(byW).map(([id, v]) => {
+    const st = sessionTotals[id] || { totalMs: 0, active: false };
+    const total = v.ok + v.bad;
+    const rate = total ? v.bad / total * 100 : 0;
+    const hours = st.totalMs / 3600000;
+
+    // Топовий процес — з найбільшою кількістю записів
+    const procs = workerProcesses[id] || {};
+    const sortedProcs = Object.entries(procs).sort((a, b) => b[1].count - a[1].count);
+    const topProc = sortedProcs[0];
+    const otherCount = sortedProcs.length - 1;
+
+    return {
+      id, name: v.name, ok: v.ok, bad: v.bad, total,
+      rate,
+      workMs: st.totalMs,
+      isActive: st.active,
+      perHour: hours > 0 ? total / hours : 0,
+      topProc,
+      otherCount
+    };
+  }).sort((a, b) => b.total - a.total).slice(0, 20);
+  if (!arr.length) return '<div class="empty">Немає даних</div>';
+  const maxT = arr[0].total || 1;
+  return `<table class="data-table"><thead><tr>
+    <th>Працівник</th><th>Відділ</th><th>Процес / позиція</th><th>OK</th><th>Брак</th><th>Всього</th><th>% Браку</th><th>Час роботи</th><th>шт/год</th>
+  </tr></thead><tbody>${arr.map(r => {
+    const procCell = r.topProc
+      ? `<div style="font-weight:500;">${esc(r.topProc[1].name)}</div>
+         <div style="color:#999;font-size:11px;">${r.topProc[0]} • ${r.topProc[1].count} шт${r.otherCount > 0 ? ' • ще ' + r.otherCount + ' інших' : ''}</div>`
+      : '<span style="color:#999;">—</span>';
+    const wd = state.workersWithDepts[r.id];
+    const deptName = wd && wd.deptId ? (state.departments[wd.deptId] || wd.deptId) : '—';
+    return `<tr>
+      <td>${esc(r.name)} <span style="color:#999;font-size:11px;">${r.id}</span>${r.isActive ? ' <span style="color:#16a34a;font-size:10px;">● активний</span>' : ''}</td>
+      <td><span style="font-size:12px;color:#666;">${esc(deptName)}</span></td>
+      <td>${procCell}</td>
+      <td>${r.ok}</td>
+      <td>${r.bad}</td>
+      <td><span class="bar" style="width:${r.total/maxT*80}px"></span>${r.total}</td>
+      <td><span class="pct ${rateClass(r.rate)}">${r.rate.toFixed(1)}%</span></td>
+      <td style="font-family:monospace;font-size:12px;">${r.workMs > 0 ? formatWorkTime(r.workMs) : '—'}</td>
+      <td style="font-weight:600;">${r.perHour > 0 ? r.perHour.toFixed(1) : '—'}</td>
+    </tr>`;
+  }).join('')}</tbody></table>`;
+}
+
+function computeSessionTotals(sessions) {
+  const byWorker = {};
+  sessions.forEach(s => {
+    if (!s._d) return;
+    if (!byWorker[s.workerId]) byWorker[s.workerId] = [];
+    byWorker[s.workerId].push(s);
+  });
+
+  const totals = {};
+  Object.entries(byWorker).forEach(([workerId, events]) => {
+    events.sort((a, b) => a._d - b._d);
+    let totalMs = 0;
+    let openStart = null;
+    for (const e of events) {
+      const t = String(e.type || '').toUpperCase();
+      if (t.includes('СТАРТ') || t === 'START') {
+        if (!openStart) openStart = e._d;
+      } else if (t.includes('СТОП') || t === 'STOP') {
+        if (openStart) {
+          totalMs += (e._d - openStart);
+          openStart = null;
+        }
+      }
+    }
+    // Якщо сесія відкрита — рахуємо до поточного часу
+    let active = false;
+    if (openStart) {
+      const capEnd = new Date();
+      // Обмежуємо до кінця дня, якщо відкрита сесія почалась не сьогодні
+      const sameDay = openStart.toDateString() === capEnd.toDateString();
+      if (sameDay) {
+        totalMs += (capEnd - openStart);
+        active = true;
+      } else {
+        // Забутий "СТОП" — обмежуємо до кінця того дня
+        const endOfDay = new Date(openStart);
+        endOfDay.setHours(23, 59, 59);
+        totalMs += (endOfDay - openStart);
+      }
+    }
+    totals[workerId] = { totalMs, active };
+  });
+
+  return totals;
+}
+
+function formatWorkTime(ms) {
+  const totalMin = Math.floor(ms / 60000);
+  const hours = Math.floor(totalMin / 60);
+  const minutes = totalMin % 60;
+  if (hours > 0) return hours + 'г ' + String(minutes).padStart(2, '0') + 'хв';
+  return minutes + ' хв';
+}
+
+const state_positionsSort = { col: 'total', dir: 'desc' };
+
+function renderComponentsTable(f, avgTimes) {
+  const byC = {};
+  const q = (state.filter.positionSearch || '').toLowerCase().trim();
+
+  [...f.ok, ...f.bad].forEach(r => {
+    const k = r.componentId;
+    if (!byC[k]) byC[k] = { name: r.componentName, ok: 0, bad: 0, workers: new Set(), lastTime: null };
+    if (r._type === 'ok') byC[k].ok++; else byC[k].bad++;
+    byC[k].workers.add(r.workerId);
+    if (!byC[k].lastTime || r._d > byC[k].lastTime) byC[k].lastTime = r._d;
+  });
+
+  let arr = Object.entries(byC).map(([id, v]) => ({
+    id, name: v.name, ok: v.ok, bad: v.bad, total: v.ok + v.bad,
+    rate: v.ok + v.bad ? v.bad / (v.ok + v.bad) * 100 : 0,
+    kind: state.components[id] ? 'К' : state.processes[id] ? 'П' : '?',
+    avgMs: avgTimes[id] || null,
+    workers: v.workers.size,
+    lastTime: v.lastTime
+  })).filter(r => r.total >= 1);
+
+  // Пошук
+  if (q) {
+    arr = arr.filter(r => r.id.toLowerCase().includes(q) || r.name.toLowerCase().includes(q));
+  }
+
+  // Сортування
+  const s = state_positionsSort;
+  arr.sort((a, b) => {
+    let cmp = 0;
+    if (s.col === 'name') cmp = a.name.localeCompare(b.name, 'uk');
+    else if (s.col === 'rate') cmp = a.rate - b.rate;
+    else if (s.col === 'avgMs') cmp = (a.avgMs || 0) - (b.avgMs || 0);
+    else if (s.col === 'lastTime') cmp = (a.lastTime || 0) - (b.lastTime || 0);
+    else cmp = (a[s.col] || 0) - (b[s.col] || 0);
+    return s.dir === 'asc' ? cmp : -cmp;
+  });
+
+  if (!arr.length) return '<div class="empty">Немає даних</div>';
+
+  const sortIcon = (col) => s.col === col ? (s.dir === 'asc' ? ' ↑' : ' ↓') : '';
+  const th = (col, label, align) => `<th style="cursor:pointer;text-align:${align || 'left'};" onclick="sortPositions('${col}')">${label}${sortIcon(col)}</th>`;
+
+  // Компактна підказка про кількість
+  const info = `<div style="font-size:12px;color:#666;margin-bottom:8px;">Знайдено ${arr.length} позицій${q ? ' по запиту "' + esc(q) + '"' : ''}</div>`;
+
+  return info + `<table class="data-table"><thead><tr>
+    ${th('name', 'Позиція')}
+    <th>Тип</th>
+    ${th('total', 'Всього', 'right')}
+    ${th('ok', 'OK', 'right')}
+    ${th('bad', 'Брак', 'right')}
+    ${th('rate', '% Браку', 'right')}
+    ${th('avgMs', 'Ср. час', 'right')}
+    ${th('workers', 'Прац.', 'right')}
+    ${th('lastTime', 'Остання', 'right')}
+  </tr></thead><tbody>${arr.slice(0, 100).map(r => `
+    <tr>
+      <td>${esc(r.name)} <span style="color:#999;font-size:11px;">${r.id}</span></td>
+      <td><span style="font-size:11px;color:#666;">${r.kind === 'К' ? 'Компл.' : r.kind === 'П' ? 'Процес' : '—'}</span></td>
+      <td style="text-align:right;font-weight:600;">${r.total}</td>
+      <td style="text-align:right;color:#16a34a;">${r.ok}</td>
+      <td style="text-align:right;color:#dc2626;">${r.bad}</td>
+      <td style="text-align:right;"><span class="pct ${rateClass(r.rate)}">${r.rate.toFixed(1)}%</span></td>
+      <td style="text-align:right;font-family:monospace;font-size:12px;">${r.avgMs ? formatDuration(r.avgMs) : '—'}</td>
+      <td style="text-align:right;">${r.workers}</td>
+      <td style="text-align:right;font-size:11px;color:#666;">${r.lastTime ? formatShortTime(r.lastTime) : '—'}</td>
+    </tr>`).join('')}</tbody></table>` + (arr.length > 100 ? `<div style="font-size:12px;color:#999;margin-top:8px;">Показано 100 з ${arr.length}. Скористайся пошуком щоб знайти конкретну позицію.</div>` : '');
+}
+
+function sortPositions(col) {
+  if (state_positionsSort.col === col) {
+    state_positionsSort.dir = state_positionsSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    state_positionsSort.col = col;
+    state_positionsSort.dir = (col === 'name') ? 'asc' : 'desc';
+  }
+  render();
+}
+
+function formatShortTime(d) {
+  if (!d) return '—';
+  const now = new Date();
+  const diffMs = now - d;
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return 'щойно';
+  if (diffMin < 60) return diffMin + ' хв тому';
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return diffHours + ' год тому';
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 30) return diffDays + ' дн тому';
+  return d.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function renderDailyTable(all) {
+  const buckets = {};
+  all.forEach(r => {
+    if (!r._d) return;
+    const d = r._d;
+    const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    if (!buckets[key]) buckets[key] = { ok: 0, bad: 0, workers: new Set(), positions: new Set() };
+    if (r._type === 'ok') buckets[key].ok++;
+    else buckets[key].bad++;
+    buckets[key].workers.add(r.workerId);
+    buckets[key].positions.add(r.componentId);
+  });
+
+  const rows = Object.entries(buckets).map(([date, v]) => ({
+    date,
+    ok: v.ok, bad: v.bad, total: v.ok + v.bad,
+    rate: v.ok + v.bad ? v.bad / (v.ok + v.bad) * 100 : 0,
+    workers: v.workers.size, positions: v.positions.size
+  })).sort((a, b) => b.date.localeCompare(a.date));
+
+  if (!rows.length) return '<div class="empty">Немає даних за цей період</div>';
+
+  return `<table class="data-table"><thead><tr>
+    <th>Дата</th><th>Всього</th><th>OK</th><th>Брак</th><th>% Браку</th><th>Прац.</th><th>Позицій</th>
+  </tr></thead><tbody>${rows.map(r => {
+    const parts = r.date.split('-');
+    const displayDate = parts[2] + '.' + parts[1] + '.' + parts[0];
+    return `<tr>
+      <td>${displayDate}</td>
+      <td><strong>${r.total}</strong></td>
+      <td style="color:#16a34a;">${r.ok}</td>
+      <td style="color:#dc2626;">${r.bad}</td>
+      <td><span class="pct ${rateClass(r.rate)}">${r.rate.toFixed(1)}%</span></td>
+      <td>${r.workers}</td>
+      <td>${r.positions}</td>
+    </tr>`;
+  }).join('')}</tbody></table>`;
+}
+
+function calculateAvgTimes(all) {
+  // Групуємо по (workerId, componentId) і сортуємо по часу
+  const groups = {};
+  all.forEach(r => {
+    if (!r._d) return;
+    const key = r.workerId + '|' + r.componentId;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(r);
+  });
+
+  const MAX_GAP_MS = 30 * 60 * 1000; // 30 хв — довше = перерва, не рахуємо
+  const deltasByPosition = {};
+
+  Object.entries(groups).forEach(([key, recs]) => {
+    const compId = key.split('|')[1];
+    recs.sort((a, b) => a._d - b._d);
+    for (let i = 1; i < recs.length; i++) {
+      const delta = recs[i]._d - recs[i - 1]._d;
+      if (delta > 0 && delta <= MAX_GAP_MS) {
+        if (!deltasByPosition[compId]) deltasByPosition[compId] = [];
+        deltasByPosition[compId].push(delta);
+      }
+    }
+  });
+
+  const avgs = {};
+  Object.entries(deltasByPosition).forEach(([id, deltas]) => {
+    if (deltas.length < 1) return;
+    const sum = deltas.reduce((a, b) => a + b, 0);
+    avgs[id] = sum / deltas.length;
+  });
+
+  return avgs;
+}
+
+function formatDuration(ms) {
+  const totalSec = Math.round(ms / 1000);
+  const hours = Math.floor(totalSec / 3600);
+  const minutes = Math.floor((totalSec % 3600) / 60);
+  const seconds = totalSec % 60;
+  if (hours > 0) return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function rateClass(r) { return r >= 10 ? 'high' : r >= 3 ? 'med' : 'low'; }
+
+function renderRecentTable(all) {
+  if (!all.length) return '<div class="empty">Немає записів за цей період</div>';
+
+  // Групуємо послідовні однакові записи в пачки
+  // Пачка = послідовні записи з однаковими workerId, componentId, статусом, часом і аркушем
+  // (записи з різницею часу до 5 секунд рахуємо як одну пачку)
+  const batches = [];
+  let current = null;
+  for (const r of all) {
+    if (current
+        && current.workerId === r.workerId
+        && current.componentId === r.componentId
+        && current._type === r._type
+        && current.sheet === r.sheet
+        && current.time === r.time) {
+      // Продовження пачки
+      current.count++;
+      current.rows.push(r.row);
+      if (r.row < current.firstRow) current.firstRow = r.row;
+      if (r.row > current.lastRow) current.lastRow = r.row;
+    } else {
+      if (current) batches.push(current);
+      current = {
+        time: r.time, _d: r._d,
+        workerId: r.workerId, workerName: r.workerName,
+        componentId: r.componentId, componentName: r.componentName,
+        _type: r._type, sheet: r.sheet,
+        count: 1, rows: [r.row],
+        firstRow: r.row, lastRow: r.row
+      };
+    }
+  }
+  if (current) batches.push(current);
+
+  const rows = batches.slice(0, 50);
+
+  return `<table class="data-table"><thead><tr>
+    <th>Час</th><th>Працівник</th><th>Позиція</th><th>Статус</th><th style="text-align:right;">Дії</th>
+  </tr></thead><tbody>${rows.map(b => {
+    const targetLabel = b._type === 'ok' ? 'Брак' : 'OK';
+    const moveTitle = 'Перенести ' + b.count + ' записів у ' + targetLabel;
+    const delTitle  = 'Видалити ' + b.count + ' записів';
+    const isSingle = b.count === 1;
+    return `<tr>
+      <td><span class="badge-ts">${b.time}</span></td>
+      <td>${esc(b.workerName)} <span style="color:#999;font-size:11px;">${b.workerId}</span></td>
+      <td>${esc(b.componentName)} <span style="color:#999;font-size:11px;">${b.componentId}</span></td>
+      <td>
+        <span class="status-cell ${b._type === 'ok' ? 'status-ok' : 'status-bad'}">${b._type === 'ok' ? 'OK' : 'БРАК'}</span>
+        ${!isSingle ? `<span style="margin-left:6px;font-weight:600;color:#666;">×${b.count}</span>` : ''}
+      </td>
+      <td style="text-align:right;white-space:nowrap;">
+        <button class="del-btn move-btn" onclick="moveBatch('${b.sheet}', ${b.firstRow}, ${b.count}, '${b._type}')" title="${moveTitle}">→ ${targetLabel}</button>
+        <button class="del-btn" onclick="deleteBatch('${b.sheet}', ${b.firstRow}, ${b.count})" title="${delTitle}">🗑 ${isSingle ? '' : b.count}</button>
+      </td>
+    </tr>`;
+  }).join('')}</tbody></table>`;
+}
+
+async function deleteBatch(sheet, firstRow, count) {
+  const label = count === 1 ? 'цей запис' : count + ' записів';
+  if (!confirm('Видалити ' + label + '? Дія відновлюється тільки через історію версій Google Sheets.')) return;
+
+  try {
+    const res = await fetch(state.webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: count === 1 ? 'delete' : 'undo',
+        sheet: sheet,
+        row: firstRow,
+        firstRow: firstRow,
+        count: count
+      })
+    });
+    const data = await res.json();
+    if (data.status !== 'ok') throw new Error(data.message);
+    await loadData();
+  } catch (err) {
+    alert('Помилка видалення: ' + err.message);
+  }
+}
+
+async function moveBatch(sheet, firstRow, count, fromType) {
+  const from = fromType === 'ok' ? 'Робочі' : 'Брак';
+  const to   = fromType === 'ok' ? 'Брак' : 'Робочі';
+  const label = count === 1 ? 'запис' : count + ' записів';
+  if (!confirm('Перенести ' + label + ' з "' + from + '" у "' + to + '"?')) return;
+
+  try {
+    const res = await fetch(state.webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'move',
+        fromSheet: sheet,
+        firstRow: firstRow,
+        count: count
+      })
+    });
+    const data = await res.json();
+    if (data.status !== 'ok') throw new Error(data.message);
+    await loadData();
+  } catch (err) {
+    alert('Помилка переміщення: ' + err.message);
+  }
+}
+
+// Стара deleteRecord залишається для backwards compat
+async function deleteRecord(sheet, row) {
+  return deleteBatch(sheet, row, 1);
+}
+
+function renderDailyChart(f) {
+  const buckets = {};
+  [...f.ok, ...f.bad].forEach(r => {
+    const d = r._d;
+    if (!d) return;
+    const k = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    if (!buckets[k]) buckets[k] = { ok: 0, bad: 0 };
+    if (r._type === 'ok') buckets[k].ok++; else buckets[k].bad++;
+  });
+  const labels = Object.keys(buckets).sort();
+  const okData = labels.map(k => buckets[k].ok);
+  const badData = labels.map(k => buckets[k].bad);
+  const displayLabels = labels.map(k => k.slice(5).replace('-', '.'));
+
+  if (state.charts.daily) state.charts.daily.destroy();
+  state.charts.daily = new Chart(document.getElementById('chart-daily'), {
+    type: 'bar',
+    data: {
+      labels: displayLabels,
+      datasets: [
+        { label: 'OK', data: okData, backgroundColor: '#16a34a' },
+        { label: 'Брак', data: badData, backgroundColor: '#dc2626' }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } },
+      plugins: { legend: { position: 'bottom' } }
+    }
+  });
+}
+
+function renderDonutChart(f) {
+  if (state.charts.donut) state.charts.donut.destroy();
+  state.charts.donut = new Chart(document.getElementById('chart-donut'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Прийнято', 'Брак'],
+      datasets: [{
+        data: [f.ok.length, f.bad.length],
+        backgroundColor: ['#16a34a', '#dc2626']
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom' } }
+    }
+  });
+}
+
+function exportCSV() {
+  const f = filtered();
+  const all = [...f.ok.map(r => ({ ...r, status: 'OK' })), ...f.bad.map(r => ({ ...r, status: 'Брак' }))]
+    .sort((a, b) => (a._d || 0) - (b._d || 0));
+  if (!all.length) { alert('Немає даних'); return; }
+  const bom = '\uFEFF';
+  const header = 'Час,ID працівника,Імʼя,ID процесу,Назва,Статус\n';
+  const rows = all.map(r => `"${r.time}","${r.workerId}","${r.workerName}","${r.componentId}","${r.componentName}","${r.status}"`).join('\n');
+  const blob = new Blob([bom + header + rows], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'analytics_' + new Date().toISOString().slice(0, 10) + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+state.filter.worker = state.filter.worker || '';
+state.filter.component = document.getElementById('filter-component').value;
+state.filter.type = document.getElementById('filter-type').value;
+state.filter.department = document.getElementById('filter-department') ? document.getElementById('filter-department').value : '';
+document.getElementById('filter-component').addEventListener('change', e => { state.filter.component = e.target.value; render(); });
+document.getElementById('filter-type').addEventListener('change', e => { state.filter.type = e.target.value; render(); });
+
+// Пошук працівника — searchable dropdown
+const workerInput = document.getElementById('worker-search-input');
+const workerList = document.getElementById('worker-search-list');
+const workerClear = document.getElementById('worker-search-clear');
+
+workerInput.addEventListener('focus', () => {
+  // Показуємо повний список (може ігноруємо поточне значення в input бо це імʼя обраного)
+  renderWorkerSearchList('');
+  workerInput.select();
+  workerList.classList.add('open');
+});
+workerInput.addEventListener('input', () => {
+  renderWorkerSearchList(workerInput.value);
+  workerList.classList.add('open');
+});
+workerInput.addEventListener('blur', () => {
+  // Даємо час на mousedown в опції
+  setTimeout(() => {
+    workerList.classList.remove('open');
+    // Якщо користувач ввів текст але не вибрав нічого — відновлюємо назву поточного вибраного
+    if (state.filter.worker && state.workers[state.filter.worker]) {
+      workerInput.value = state.workers[state.filter.worker];
+    } else {
+      workerInput.value = '';
+    }
+  }, 200);
+});
+workerClear.addEventListener('click', () => {
+  selectWorker('');
+  workerInput.focus();
+});
+
+// Закривати дропдаун при кліку поза
+document.addEventListener('click', (e) => {
+  const wrap = document.getElementById('worker-search-wrap');
+  if (wrap && !wrap.contains(e.target)) {
+    workerList.classList.remove('open');
+  }
+});
+
+// Каскадний фільтр — при зміні відділу оновлюємо список працівників
+// і скидаємо вибраного якщо він не з нового відділу
+const filterDept = document.getElementById('filter-department');
+if (filterDept) filterDept.addEventListener('change', e => {
+  state.filter.department = e.target.value;
+  // Перевіряємо чи поточний працівник у новому відділі
+  if (state.filter.worker) {
+    const wd = state.workersWithDepts[state.filter.worker];
+    if (state.filter.department && (!wd || wd.deptId !== state.filter.department)) {
+      // Не у цьому відділі — скидаємо
+      selectWorker('');
+      // render() виклик уже всередині selectWorker → не викликаємо ще раз
+      return;
+    }
+  }
+  render();
+});
+
+// Пошук по позиціях (event delegation бо поле рендериться заново кожен раз)
+let positionsSearchTimeout = null;
+document.addEventListener('input', (e) => {
+  if (e.target && e.target.id === 'positions-search') {
+    clearTimeout(positionsSearchTimeout);
+    const val = e.target.value;
+    // Debounce 200мс щоб не рендерити на кожен символ
+    positionsSearchTimeout = setTimeout(() => {
+      state.filter.positionSearch = val;
+      // Зберігаємо позицію курсора
+      render();
+      const newInput = document.getElementById('positions-search');
+      if (newInput) {
+        newInput.value = val;
+        newInput.focus();
+        const len = val.length;
+        newInput.setSelectionRange(len, len);
+      }
+    }, 200);
+  }
+});
+
+// Після кожного рендеру відновлюємо значення пошуку у полі
+const origRender = render;
+render = function() {
+  origRender();
+  const searchInput = document.getElementById('positions-search');
+  if (searchInput && state.filter.positionSearch) {
+    searchInput.value = state.filter.positionSearch;
+  }
+};
+
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+</script>
+
+</body>
+</html>

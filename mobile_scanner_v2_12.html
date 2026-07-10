@@ -1,0 +1,1451 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <title>Сканер процесів v2</title>
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a1a; color: #fff; min-height: 100vh; }
+    .app { max-width: 600px; margin: 0 auto; padding-bottom: 100px; }
+
+    /* Header */
+    .header { padding: 12px 16px; background: #2a2a2a; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 10; }
+    .worker-info { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+    .worker-avatar { width: 32px; height: 32px; border-radius: 50%; background: #4ade80; color: #000; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex-shrink: 0; }
+    .worker-name { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .worker-id { font-size: 11px; color: #888; }
+    .header-btn { background: transparent; border: 1px solid #444; color: #ccc; padding: 6px 10px; font-size: 12px; border-radius: 6px; cursor: pointer; }
+
+    /* Session row */
+    .session-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: #262626; border-bottom: 1px solid #333; gap: 12px; }
+    .session-row.active { background: #14351f; }
+    .session-info { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+    .session-dot { width: 10px; height: 10px; border-radius: 50%; background: #666; flex-shrink: 0; }
+    .session-dot.active { background: #4ade80; animation: pulse-dot 2s infinite; }
+    @keyframes pulse-dot { 0%,100% { opacity: 1; box-shadow: 0 0 0 0 rgba(74,222,128,0.6); } 50% { opacity: 0.7; box-shadow: 0 0 0 6px rgba(74,222,128,0); } }
+    .session-status { font-size: 13px; color: #ccc; font-weight: 500; }
+    .session-status.active { color: #4ade80; }
+    .session-time { font-size: 11px; color: #888; font-family: monospace; margin-top: 2px; }
+    .session-btn { padding: 10px 14px; border-radius: 8px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; flex-shrink: 0; white-space: nowrap; }
+    .session-btn.start { background: #4ade80; color: #000; }
+    .session-btn.stop { background: #f97316; color: #000; }
+    .session-btn:active { transform: scale(0.96); }
+
+    /* Scanner area */
+    .scanner-wrap { position: relative; background: #000; width: 100%; aspect-ratio: 4/3; overflow: hidden; }
+    #reader { width: 100%; height: 100%; }
+    #reader video { width: 100% !important; height: 100% !important; object-fit: cover !important; }
+
+    .scanner-overlay { position: absolute; inset: 0; pointer-events: none; display: flex; align-items: center; justify-content: center; }
+    .scan-frame { width: 75%; max-width: 320px; aspect-ratio: 2/1; border-radius: 12px; position: relative; }
+    .scan-frame::before, .scan-frame::after, .scan-frame > span::before, .scan-frame > span::after {
+      content: ''; position: absolute; width: 24px; height: 24px; border-color: #4ade80; border-style: solid; border-width: 0;
+    }
+    .scan-frame::before { top: 0; left: 0; border-top-width: 4px; border-left-width: 4px; border-radius: 12px 0 0 0; }
+    .scan-frame::after  { top: 0; right: 0; border-top-width: 4px; border-right-width: 4px; border-radius: 0 12px 0 0; }
+    .scan-frame > span::before { bottom: 0; left: 0; border-bottom-width: 4px; border-left-width: 4px; border-radius: 0 0 0 12px; }
+    .scan-frame > span::after  { bottom: 0; right: 0; border-bottom-width: 4px; border-right-width: 4px; border-radius: 0 0 12px 0; }
+
+    .scanner-status { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); padding: 6px 14px; border-radius: 20px; font-size: 12px; backdrop-filter: blur(8px); }
+
+    /* Login / start overlay */
+    .start-overlay { position: absolute; inset: 0; background: #222; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; text-align: center; }
+    .start-overlay.hidden { display: none; }
+    .start-overlay h2 { font-size: 18px; margin-bottom: 8px; }
+    .start-overlay p { color: #ccc; font-size: 14px; max-width: 280px; }
+    .start-btn { background: #4ade80; color: #000; border: none; padding: 14px 28px; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; }
+    .start-btn:active { transform: scale(0.97); }
+    .start-btn.secondary { background: transparent; color: #ccc; border: 1px solid #444; }
+
+    /* Last result */
+    .last-result { padding: 16px; background: #2a2a2a; border-bottom: 1px solid #333; min-height: 80px; transition: background 0.3s; }
+    .last-result.ok  { background: #1a3a1a; }
+    .last-result.bad { background: #3a1a1a; }
+    .last-result.err { background: #3a2a1a; }
+    .lr-title { font-size: 16px; font-weight: 600; margin-bottom: 2px; }
+    .lr-detail { font-size: 13px; color: #ccc; }
+    .undo-btn { display: none; margin-top: 10px; padding: 8px 14px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: #fff; font-size: 13px; font-weight: 500; border-radius: 8px; cursor: pointer; }
+    .undo-btn:active { background: rgba(255,255,255,0.2); transform: scale(0.97); }
+    .undo-btn.visible { display: inline-block; }
+    .undo-btn.pending { opacity: 0.5; cursor: wait; }
+    .fix-btn { margin-top: 8px; margin-left: 6px; padding: 8px 14px; background: rgba(255,180,80,0.15); border: 1px solid rgba(255,180,80,0.4); color: #fbbf24; font-size: 13px; font-weight: 500; border-radius: 8px; cursor: pointer; display: inline-block; }
+    .fix-btn:active { transform: scale(0.97); }
+
+    /* Fix panel — overlay with recent batches */
+    .fix-panel { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 100; display: none; flex-direction: column; padding: 16px; }
+    .fix-panel.open { display: flex; }
+    .fix-panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .fix-panel-title { font-size: 18px; font-weight: 600; color: #fff; }
+    .fix-panel-close { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: #fff; padding: 8px 14px; border-radius: 8px; font-size: 14px; cursor: pointer; }
+    .fix-panel-list { flex: 1; overflow-y: auto; }
+    .fix-batch { background: #2a2a2a; border: 1px solid #444; border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+    .fix-batch-info { color: #ccc; font-size: 14px; margin-bottom: 8px; }
+    .fix-batch-time { color: #888; font-size: 11px; margin-top: 2px; }
+    .fix-batch-status { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; margin-left: 4px; }
+    .fix-batch-status.ok { background: #14532d; color: #86efac; }
+    .fix-batch-status.bad { background: #7f1d1d; color: #fca5a5; }
+    .fix-batch-count { display: inline-block; margin-left: 4px; color: #fbbf24; font-weight: 600; }
+    .fix-batch-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .fix-action { flex: 1; padding: 10px 12px; border-radius: 8px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .fix-action.move { background: #1e40af; color: #fff; }
+    .fix-action.del { background: #7f1d1d; color: #fff; }
+    .fix-action:active { transform: scale(0.97); }
+    .fix-panel-empty { color: #888; text-align: center; padding: 40px 20px; }
+
+    /* Counters */
+    .counters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: #333; }
+    .counter { background: #1a1a1a; padding: 12px; text-align: center; }
+    .counter-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+    .counter-val { font-size: 22px; font-weight: 700; margin-top: 4px; }
+    .cv-ok  { color: #4ade80; }
+    .cv-bad { color: #f87171; }
+
+    /* Tabs */
+    .tabs { display: flex; background: #1a1a1a; border-bottom: 1px solid #333; }
+    .tab { flex: 1; padding: 12px; background: transparent; border: none; color: #888; font-size: 14px; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; }
+    .tab.active { color: #fff; border-bottom-color: #4ade80; }
+
+    /* Current component */
+    .current-comp { background: #2a2a2a; padding: 12px 16px; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 12px; }
+    .cc-icon { width: 36px; height: 36px; border-radius: 8px; background: #444; color: #ccc; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+    .cc-icon.active { background: #4ade80; color: #000; }
+    .cc-info { flex: 1; min-width: 0; }
+    .cc-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+    .cc-name { font-size: 15px; font-weight: 500; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cc-name.muted { color: #888; font-weight: 400; }
+    .cc-id { font-size: 11px; color: #666; }
+    .cc-clear { background: transparent; border: 1px solid #444; color: #888; padding: 6px 10px; font-size: 12px; border-radius: 6px; cursor: pointer; }
+
+    /* Recent processes quick-pick */
+    .recent-bar { background: #262626; padding: 10px 12px; border-bottom: 1px solid #333; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+    .recent-bar::-webkit-scrollbar { display: none; }
+    .recent-bar-label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+    .recent-chips { display: flex; gap: 6px; }
+    .recent-chip { flex-shrink: 0; background: #333; border: 1px solid #444; color: #ddd; padding: 8px 14px; border-radius: 20px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px; max-width: 200px; }
+    .recent-chip:active { transform: scale(0.96); background: #444; }
+    .recent-chip.active { background: #14532d; border-color: #4ade80; color: #4ade80; }
+    .recent-chip .rc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .recent-chip .rc-id { font-size: 10px; color: #888; }
+    .recent-chip.active .rc-id { color: #86efac; }
+
+    /* Big action buttons */
+    .action-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; background: #333; }
+    .action-btn { padding: 28px 16px; border: none; font-size: 22px; font-weight: 700; cursor: pointer; transition: transform 0.1s, opacity 0.2s; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+    .action-btn .ab-icon { font-size: 32px; line-height: 1; }
+    .action-btn .ab-label { font-size: 18px; }
+    .action-btn.ok  { background: #166534; color: #fff; }
+    .action-btn.nok { background: #7f1d1d; color: #fff; }
+    .action-btn.ok:active  { background: #15803d; transform: scale(0.97); }
+    .action-btn.nok:active { background: #991b1b; transform: scale(0.97); }
+    .action-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .action-btn:disabled:active { transform: none; }
+
+    /* Quantity row */
+    .qty-row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: #2a2a2a; border-bottom: 1px solid #333; }
+    .qty-label { flex: 1; font-size: 13px; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; }
+    .qty-btn { width: 48px; height: 48px; border-radius: 10px; background: #444; color: #fff; font-size: 26px; font-weight: 700; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; line-height: 1; }
+    .qty-btn:active { background: #555; transform: scale(0.94); }
+    .qty-input { width: 70px; height: 48px; text-align: center; font-size: 22px; font-weight: 700; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 10px; padding: 0; -moz-appearance: textfield; }
+    .qty-input::-webkit-outer-spin-button, .qty-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .qty-input:focus { outline: none; border-color: #4ade80; }
+
+    /* History */
+    .history { background: #1a1a1a; }
+    .record { padding: 12px 16px; border-bottom: 1px solid #2a2a2a; }
+    .record-name { font-size: 14px; font-weight: 500; }
+    .record-component { font-size: 13px; color: #aaa; margin-top: 2px; }
+    .record-meta { font-size: 11px; color: #666; margin-top: 2px; }
+    .empty { text-align: center; padding: 40px 20px; color: #666; font-size: 14px; }
+
+    /* Settings */
+    .settings { padding: 16px; background: #1a1a1a; border-bottom: 1px solid #333; }
+    .settings summary { font-size: 13px; color: #888; cursor: pointer; padding: 4px 0; list-style: none; }
+    .settings summary::before { content: '⚙ '; }
+    .settings input, .settings select { width: 100%; margin-top: 8px; padding: 10px; background: #2a2a2a; border: 1px solid #444; border-radius: 8px; color: #fff; font-size: 13px; }
+    .settings .btns { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+    .settings button { padding: 8px 14px; border-radius: 8px; border: 1px solid #444; background: #2a2a2a; color: #fff; font-size: 13px; cursor: pointer; flex: 1; min-width: 100px; }
+    .settings button.primary { background: #4ade80; color: #000; border-color: #4ade80; }
+    .state-line { font-size: 12px; margin-top: 8px; color: #888; }
+    .state-line.ok { color: #4ade80; }
+    .state-line.err { color: #f87171; }
+
+    /* Manual login */
+    .manual-pick { width: 100%; padding: 12px; background: #2a2a2a; border: 1px solid #444; color: #fff; border-radius: 8px; font-size: 14px; }
+  </style>
+</head>
+<body>
+
+<div class="app">
+
+  <div class="header">
+    <div class="worker-info">
+      <div class="worker-avatar" id="avatar">?</div>
+      <div style="min-width: 0;">
+        <div class="worker-name" id="worker-name">Не авторизовано</div>
+        <div class="worker-id" id="worker-id">Скануй свій бейдж</div>
+      </div>
+    </div>
+    <button class="header-btn" onclick="logout()" id="logout-btn" style="display:none;">Змінити</button>
+  </div>
+
+  <div class="session-row" id="session-row" style="display:none;">
+    <div class="session-info">
+      <span class="session-dot" id="session-dot"></span>
+      <div style="min-width: 0;">
+        <div class="session-status" id="session-status">Не працює</div>
+        <div class="session-time" id="session-time"></div>
+      </div>
+    </div>
+    <button class="session-btn start" id="session-btn" onclick="toggleSession()">▶ Початок роботи</button>
+  </div>
+
+  <div class="scanner-wrap">
+    <div id="reader"></div>
+    <div class="scanner-overlay"><div class="scan-frame"><span></span></div></div>
+    <div class="scanner-status" id="scanner-status" style="display:none;">Сканування активне</div>
+
+    <div class="start-overlay" id="start-overlay">
+      <h2>Початок роботи</h2>
+      <p id="start-msg">Натисніть, щоб увімкнути камеру. Спочатку треба налаштувати підключення до Google Sheets (нижче в "Налаштування").</p>
+      <button class="start-btn" onclick="startScanner()">Увімкнути камеру</button>
+    </div>
+  </div>
+
+  <div class="recent-bar" id="recent-bar" style="display:none;">
+    <div class="recent-bar-label">Останні процеси</div>
+    <div class="recent-chips" id="recent-chips"></div>
+  </div>
+
+  <div class="current-comp">
+    <div class="cc-icon" id="cc-icon">?</div>
+    <div class="cc-info">
+      <div class="cc-label">Поточна позиція</div>
+      <div class="cc-name muted" id="cc-name">Скануй ID комплектуючої або процесу</div>
+      <div class="cc-id" id="cc-id"></div>
+    </div>
+    <button class="cc-clear" id="cc-clear" onclick="clearComponent()" style="display:none;">×</button>
+  </div>
+
+  <div class="qty-row">
+    <div class="qty-label">Кількість</div>
+    <button class="qty-btn" onclick="changeQty(-1)" aria-label="Menshe">−</button>
+    <input type="number" id="qty-input" class="qty-input" value="1" min="1" max="999" inputmode="numeric" pattern="[0-9]*" />
+    <button class="qty-btn" onclick="changeQty(1)" aria-label="Bilshe">+</button>
+  </div>
+
+  <div class="action-buttons">
+    <button class="action-btn ok"  id="btn-ok"  onclick="recordResult('ok')"  disabled>
+      <span class="ab-icon">✓</span>
+      <span class="ab-label">OK</span>
+    </button>
+    <button class="action-btn nok" id="btn-nok" onclick="recordResult('bad')" disabled>
+      <span class="ab-icon">✗</span>
+      <span class="ab-label">БРАК</span>
+    </button>
+  </div>
+
+  <div class="last-result" id="last-result" style="background:#2a2a2a;">
+    <div class="lr-title">Очікування</div>
+    <div class="lr-detail">Скануй штрих-код</div>
+    <button class="undo-btn" id="undo-btn" onclick="undoLast()">↶ Скасувати останній запис</button>
+    <button class="fix-btn" onclick="openFixPanel()">🔧 Виправити останні</button>
+  </div>
+
+  <!-- Fix panel overlay -->
+  <div class="fix-panel" id="fix-panel">
+    <div class="fix-panel-header">
+      <div class="fix-panel-title">🔧 Останні дії</div>
+      <button class="fix-panel-close" onclick="closeFixPanel()">✕ Закрити</button>
+    </div>
+    <div class="fix-panel-list" id="fix-panel-list"></div>
+  </div>
+
+  <div class="counters">
+    <div class="counter"><div class="counter-label">Всього</div><div class="counter-val" id="cnt-total">0</div></div>
+    <div class="counter"><div class="counter-label">Робочі</div><div class="counter-val cv-ok" id="cnt-ok">0</div></div>
+    <div class="counter"><div class="counter-label">Брак</div><div class="counter-val cv-bad" id="cnt-bad">0</div></div>
+  </div>
+
+  <div id="sync-warning" onclick="retryUnsynced()" style="display:none;background:#7f1d1d;color:#fecaca;padding:12px 16px;text-align:center;cursor:pointer;font-size:14px;font-weight:500;border-bottom:1px solid #991b1b;"></div>
+
+  <details class="settings" id="settings-block">
+    <summary>Налаштування</summary>
+
+    <p style="font-size:12px;color:#888;margin-top:8px;">URL веб-хуку Google Sheets:</p>
+    <input type="text" id="webhook" placeholder="https://script.google.com/macros/s/.../exec" />
+
+    <div class="btns">
+      <button onclick="saveWebhook()" class="primary">Зберегти</button>
+      <button onclick="syncData()">Синхронізувати</button>
+      <button onclick="manualLogin()">Обрати вручну</button>
+    </div>
+    <div class="state-line" id="state-line">Не налаштовано</div>
+
+    <div id="manual-login" style="display:none; margin-top:12px;">
+      <p style="font-size:12px;color:#888;margin-bottom:4px;">Якщо бейдж не сканується — оберіть зі списку:</p>
+      <select class="manual-pick" id="worker-select">
+        <option value="">— Оберіть працівника —</option>
+      </select>
+
+      <p style="font-size:12px;color:#888;margin:12px 0 4px;">Поточна позиція:</p>
+      <select class="manual-pick" id="component-select">
+        <option value="">— Оберіть процес —</option>
+      </select>
+    </div>
+  </details>
+
+  <div class="tabs">
+    <button class="tab active" id="tab-ok"  onclick="switchTab('ok')">Робочі</button>
+    <button class="tab"        id="tab-bad" onclick="switchTab('bad')">Брак</button>
+  </div>
+
+  <div class="history" id="history"></div>
+
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════════
+// ⚙ URL веб-хука Apps Script.
+// Встав сюди свій URL між лапками — і на телефонах працівників
+// не треба буде нічого налаштовувати. Залиш порожнім якщо хочеш
+// щоб працівник сам вводив URL через "⚙ Налаштування".
+// Приклад:
+//   const BUILT_IN_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycb.../exec';
+// ══════════════════════════════════════════════════════════════════
+const BUILT_IN_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbz_ndl2BP_YFYAG0KTFrHjvfRhNokDYm_E8d8JMle_q0SQJQ0zC8cqMnm9dST8UE7U/exec';
+// ══════════════════════════════════════════════════════════════════
+
+const state = {
+  webhookUrl: BUILT_IN_WEBHOOK_URL || localStorage.getItem('scanner_webhook') || '',
+  workers: JSON.parse(localStorage.getItem('scanner_workers') || '{}'),
+  components: JSON.parse(localStorage.getItem('scanner_components') || '{}'),
+  processes: JSON.parse(localStorage.getItem('scanner_processes') || '{}'),
+  worker:  JSON.parse(localStorage.getItem('scanner_worker')  || 'null'),
+  currentComponent: JSON.parse(localStorage.getItem('scanner_current_comp') || 'null'),
+  recentProcesses: JSON.parse(localStorage.getItem('scanner_recent_procs') || '[]'),   // [{ id, name }] — до 3
+  qtyMemory: JSON.parse(localStorage.getItem('scanner_qty_memory') || '{}'),           // { positionId: lastQty }
+  session: null,
+  scans:   JSON.parse(localStorage.getItem('scanner_scans') || '{"ok":[],"bad":[]}'),
+  lastAction: JSON.parse(localStorage.getItem('scanner_last_action') || 'null'),
+  cameraActive: localStorage.getItem('scanner_camera_active') === '1',
+  activeTab: localStorage.getItem('scanner_active_tab') || 'ok',
+  scanner: null,
+  lastText: '',
+  lastTime: 0,
+  isPaused: false
+};
+
+const SCAN_COOLDOWN_MS = 3000;
+const PAUSE_AFTER_SCAN_MS = 2500;
+const CAMERA_IDLE_PAUSE_MS = 15000; // 15 сек бездіяльності = приспати камеру
+let cameraIdleTimer = null;
+let cameraPhysicallyPaused = false;
+
+function pauseCameraPhysical() {
+  if (!state.scanner || !state.cameraActive || cameraPhysicallyPaused) return;
+  try {
+    if (typeof state.scanner.pause === 'function') {
+      state.scanner.pause(true);
+      cameraPhysicallyPaused = true;
+      const statusEl = document.getElementById('scanner-status');
+      if (statusEl) statusEl.textContent = '💤 Камера призупинена (тап щоб продовжити)';
+      // Показуємо overlay щоб можна було "розбудити"
+      const overlay = document.getElementById('start-overlay');
+      if (overlay) {
+        overlay.classList.remove('hidden');
+        const btn = overlay.querySelector('.start-btn');
+        if (btn) btn.textContent = '▶ Продовжити сканування';
+      }
+    }
+  } catch (e) {
+    console.log('Pause failed', e);
+  }
+}
+
+function resumeCameraPhysical() {
+  if (!state.scanner || !cameraPhysicallyPaused) return;
+  try {
+    if (typeof state.scanner.resume === 'function') {
+      state.scanner.resume();
+      cameraPhysicallyPaused = false;
+      const statusEl = document.getElementById('scanner-status');
+      if (statusEl) statusEl.textContent = 'Сканування активне';
+      const overlay = document.getElementById('start-overlay');
+      if (overlay) {
+        overlay.classList.add('hidden');
+        const btn = overlay.querySelector('.start-btn');
+        if (btn) btn.textContent = 'Увімкнути камеру';
+      }
+      resetIdleTimer();
+    }
+  } catch (e) {
+    console.log('Resume failed', e);
+  }
+}
+
+function resetIdleTimer() {
+  if (cameraIdleTimer) clearTimeout(cameraIdleTimer);
+  if (!state.cameraActive) return;
+  cameraIdleTimer = setTimeout(pauseCameraPhysical, CAMERA_IDLE_PAUSE_MS);
+}
+
+document.getElementById('webhook').value = state.webhookUrl;
+updateWorkerDisplay();
+updateComponentDisplay();
+updateButtonState();
+loadSession();
+updateSessionUI();
+updateStateLine();
+fillWorkerDropdown();
+renderRecentProcesses();
+
+// Відновлення стану після перезавантаження
+const savedQty = parseInt(localStorage.getItem('scanner_qty') || '1');
+if (savedQty > 0 && savedQty < 1000) {
+  document.getElementById('qty-input').value = savedQty;
+}
+// Якщо збережена історія належить іншому працівнику — очищаємо
+if (state.worker && state.scans) {
+  const allScans = [...(state.scans.ok || []), ...(state.scans.bad || [])];
+  const foreign = allScans.find(r => r.workerId && r.workerId !== state.worker.id);
+  if (foreign) {
+    state.scans = { ok: [], bad: [] };
+    state.lastAction = null;
+    persistScans();
+    persistLastAction();
+  }
+}
+updateCounters();
+renderTable();
+// Кнопка "Скасувати" — показуємо якщо lastAction було збережено
+if (state.lastAction) showUndoButton(true);
+
+updateStartMessage();
+
+// Якщо URL вбудовано в код — ховаємо тільки поле URL і кнопку Зберегти,
+// але блок налаштувань залишається з кнопками Синхронізувати і Обрати вручну
+if (BUILT_IN_WEBHOOK_URL) {
+  const webhookInput = document.getElementById('webhook');
+  if (webhookInput) {
+    webhookInput.style.display = 'none';
+    const urlHint = webhookInput.previousElementSibling;
+    if (urlHint && urlHint.tagName === 'P') urlHint.style.display = 'none';
+  }
+  const saveBtn = document.querySelector('.settings .btns button.primary');
+  if (saveBtn) saveBtn.style.display = 'none';
+}
+
+// Слухаємо ручні зміни quantity через клавіатуру
+document.getElementById('qty-input').addEventListener('input', persistQty);
+document.getElementById('qty-input').addEventListener('change', persistQty);
+
+// Автосинхронізація при завантаженні
+if (state.webhookUrl) {
+  const hasData = Object.keys(state.workers).length + Object.keys(state.components).length + Object.keys(state.processes).length > 0;
+  if (!hasData) {
+    setTimeout(() => syncData(), 100);
+  } else {
+    setTimeout(() => syncData(), 500);
+  }
+}
+
+// Автозапуск камери якщо була активна перед перезавантаженням
+if (state.cameraActive) {
+  setTimeout(() => {
+    // Даємо трохи часу щоб бібліотека завантажилась
+    if (typeof Html5Qrcode !== 'undefined') {
+      startScanner();
+    }
+  }, 300);
+}
+
+// Live timer для сесії
+setInterval(() => {
+  if (state.session && state.session.active && state.session.startTime) {
+    const elapsed = Date.now() - new Date(state.session.startTime).getTime();
+    document.getElementById('session-time').textContent = 'працює ' + formatSessionDuration(elapsed);
+  }
+}, 1000);
+
+// Автоматична повторна спроба несинхронізованих записів кожну хвилину
+setInterval(() => {
+  const hasUnsynced = state.scans.ok.some(r => !r.synced) || state.scans.bad.some(r => !r.synced);
+  if (hasUnsynced && state.webhookUrl && navigator.onLine) {
+    retryUnsynced();
+  }
+}, 60000);
+
+// Якщо мережа повернулась — миттєво спробувати
+window.addEventListener('online', () => {
+  const hasUnsynced = state.scans.ok.some(r => !r.synced) || state.scans.bad.some(r => !r.synced);
+  if (hasUnsynced && state.webhookUrl) {
+    showResult('ok', '📶 Мережа зʼявилась', 'Синхронізуємо неполадкові записи...');
+    setTimeout(retryUnsynced, 1000);
+  }
+});
+
+// Показати попередження коли мережа зникла
+window.addEventListener('offline', () => {
+  showResult('err', '📵 Немає мережі', 'Записи зберігаються локально. Синхронізуються коли з\'єднання повернеться.');
+});
+
+document.getElementById('worker-select').addEventListener('change', e => {
+  const id = e.target.value;
+  if (id && state.workers[id]) {
+    setWorker(id, state.workers[id]);
+    document.getElementById('manual-login').style.display = 'none';
+    document.getElementById('worker-select').value = '';
+  }
+});
+
+document.getElementById('component-select').addEventListener('change', e => {
+  const id = e.target.value;
+  const name = state.components[id] || state.processes[id];
+  if (id && name) {
+    setCurrentComponent(id, name);
+    document.getElementById('manual-login').style.display = 'none';
+    document.getElementById('component-select').value = '';
+  }
+});
+
+function updateStartMessage() {
+  const el = document.getElementById('start-msg');
+  if (!state.webhookUrl) {
+    el.textContent = 'Спочатку відкрий "⚙ Налаштування" нижче і введи URL веб-хуку.';
+  } else if (!state.worker) {
+    el.textContent = 'Натисни щоб увімкнути камеру і відскануй свій бейдж.';
+  } else {
+    el.textContent = 'Натисни щоб продовжити роботу. Працівник: ' + state.worker.name;
+  }
+}
+
+function startScanner() {
+  // Якщо камера просто у паузі (не зупинена) — розбуджуємо швидко
+  if (cameraPhysicallyPaused && state.scanner) {
+    resumeCameraPhysical();
+    return;
+  }
+
+  document.getElementById('start-overlay').classList.add('hidden');
+  document.getElementById('scanner-status').style.display = 'block';
+  document.getElementById('scanner-status').textContent = '⏳ Запит доступу до камери...';
+  state.cameraActive = true;
+  try { localStorage.setItem('scanner_camera_active', '1'); } catch (e) {}
+
+  // Діагностика перед стартом
+  if (!window.isSecureContext) {
+    showCameraError('Немає HTTPS',
+      'Камера у браузері працює тільки на HTTPS. Твоє посилання починається з http://, а не https://. Скажи адміністратору перезалити застосунок з HTTPS.');
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showCameraError('Браузер не підтримує камеру',
+      'Твій браузер застарий або обмежений (можливо це вбудований браузер Telegram/Facebook). Відкрий посилання у Safari (iPhone) або Chrome (Android).');
+    return;
+  }
+
+  if (!state.scanner) state.scanner = new Html5Qrcode("reader");
+
+  state.scanner.start(
+    { facingMode: "environment" },
+    {
+      fps: 10,
+      qrbox: { width: 280, height: 140 },
+      aspectRatio: 4/3,
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.CODE_93,
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.QR_CODE,
+        Html5QrcodeSupportedFormats.DATA_MATRIX,
+        Html5QrcodeSupportedFormats.ITF
+      ]
+    },
+    onScan, undefined
+  ).then(() => {
+    document.getElementById('scanner-status').textContent = 'Сканування активне';
+    resetIdleTimer(); // Стартуємо таймер бездіяльності
+  }).catch(err => {
+    const name = (err && err.name) || '';
+    const msg = (err && err.message) || err.toString();
+    let title = '⚠ Помилка камери';
+    let detail = msg;
+
+    if (name === 'NotAllowedError' || /permission|denied|not allowed/i.test(msg)) {
+      title = '🚫 Немає дозволу на камеру';
+      detail = 'Ти або хтось раніше заборонив камеру. iPhone: Налаштування → Safari → Камера → Запитувати або Дозволити, потім оновити сторінку. Android: у адресному рядку тапни іконку замочка/налаштувань → Дозволи → Камера → Дозволити.';
+    } else if (name === 'NotFoundError' || /not found|no camera|nocamera/i.test(msg)) {
+      title = '📷 Камера не знайдена';
+      detail = 'Пристрій не бачить задню камеру. Закрий інші додатки що можуть використовувати камеру.';
+    } else if (name === 'NotReadableError' || /in use|already/i.test(msg)) {
+      title = '📷 Камера зайнята';
+      detail = 'Інший додаток використовує камеру. Закрий його і спробуй ще раз.';
+    } else if (name === 'OverconstrainedError' || /overconstrained/i.test(msg)) {
+      title = '⚠ Задня камера недоступна';
+      // Пробуємо будь-яку камеру
+      state.scanner.start({}, {
+        fps: 10, qrbox: { width: 280, height: 140 }, aspectRatio: 4/3
+      }, onScan, undefined).then(() => {
+        document.getElementById('scanner-status').textContent = 'Сканування (передня камера)';
+      }).catch(err2 => {
+        showCameraError('Камера не запустилась', err2.message || err2.toString());
+      });
+      return;
+    }
+
+    showCameraError(title, detail);
+  });
+}
+
+function showCameraError(title, detail) {
+  document.getElementById('start-overlay').classList.remove('hidden');
+  document.getElementById('scanner-status').style.display = 'none';
+  state.cameraActive = false;
+  try { localStorage.setItem('scanner_camera_active', '0'); } catch (e) {}
+  showResult('err', title, detail);
+}
+
+function onScan(text) {
+  if (state.isPaused) return;
+  const now = Date.now();
+  if (text === state.lastText && now - state.lastTime < SCAN_COOLDOWN_MS) return;
+  state.lastText = text;
+  state.lastTime = now;
+
+  if (navigator.vibrate) navigator.vibrate(80);
+  beep();
+
+  state.isPaused = true;
+  const statusEl = document.getElementById('scanner-status');
+  if (statusEl) statusEl.textContent = '⏸ Пауза...';
+  setTimeout(() => {
+    state.isPaused = false;
+    if (statusEl && !cameraPhysicallyPaused) statusEl.textContent = 'Сканування активне';
+  }, PAUSE_AFTER_SCAN_MS);
+
+  resetIdleTimer(); // Скидаємо таймер бездіяльності
+  processCode(text.trim());
+}
+
+function processCode(raw) {
+  const cleanRaw = raw.includes('|') ? raw.split('|')[0] : raw;
+  const norm = cleanRaw.trim().replace(/\s/g, '').toUpperCase();
+
+  // Спецкоди тім-ліда: старт/стоп сесії
+  if (norm === 'TL-START' || norm === 'TLSTART') {
+    if (!state.worker) {
+      showResult('err', '⚠ Немає працівника', 'Спочатку скануй бейдж працівника');
+      return;
+    }
+    if (state.session && state.session.active) {
+      showResult('err', '⚠ Вже працює', state.worker.name + ' вже в активній сесії');
+      return;
+    }
+    toggleSession('start');
+    return;
+  }
+  if (norm === 'TL-STOP' || norm === 'TLSTOP') {
+    if (!state.worker) {
+      showResult('err', '⚠ Немає працівника', 'Спочатку скануй бейдж працівника');
+      return;
+    }
+    if (!state.session || !state.session.active) {
+      showResult('err', '⚠ Не працює', state.worker.name + ' зараз не в сесії');
+      return;
+    }
+    toggleSession('stop');
+    return;
+  }
+
+  // Стандартні коди
+  if (state.workers[norm]) {
+    setWorker(norm, state.workers[norm]);
+    showResult('ok', '👋 Привіт, ' + state.workers[norm] + '!', 'Готовий до роботи');
+    return;
+  }
+
+  const name = state.components[norm] || state.processes[norm];
+  if (name) {
+    setCurrentComponent(norm, name);
+    showResult('ok', '📋 Обрано: ' + name, 'Тепер тапай OK або БРАК');
+    return;
+  }
+
+  showResult('err', '⚠ Невідомий код', 'ID "' + raw + '" не знайдено серед працівників, комплектуючих чи процесів. Синхронізуй дані в налаштуваннях.');
+}
+
+function recordResult(type) {
+  if (!state.worker) {
+    showResult('err', '⚠ Авторизуйся', 'Скануй свій бейдж щоб працювати');
+    return;
+  }
+  if (!state.currentComponent) {
+    showResult('err', '⚠ Обери позицію', 'Скануй ID комплектуючої/процесу або обери у налаштуваннях');
+    return;
+  }
+  const count = getQty();
+  if (navigator.vibrate) navigator.vibrate(50);
+  beep();
+  saveRecord(state.currentComponent.id, state.currentComponent.name, type, count);
+
+  // Після OK/БРАК одразу приспати камеру для економії батареї
+  // Працівник може продовжити тапом на «Продовжити» або кнопки-чипси
+  if (cameraIdleTimer) clearTimeout(cameraIdleTimer);
+  setTimeout(pauseCameraPhysical, 800);
+}
+
+function getQty() {
+  const val = parseInt(document.getElementById('qty-input').value) || 1;
+  return Math.max(1, Math.min(999, val));
+}
+
+function persistQty() {
+  try { localStorage.setItem('scanner_qty', String(getQty())); } catch (e) {}
+}
+
+function changeQty(delta) {
+  const input = document.getElementById('qty-input');
+  let val = parseInt(input.value) || 1;
+  val = Math.max(1, Math.min(999, val + delta));
+  input.value = val;
+  persistQty();
+}
+
+function saveRecord(componentId, componentName, type, count) {
+  count = count || 1;
+  const bucket = type === 'ok' ? 'ok' : 'bad';
+  const now = new Date();
+  const timeStr = now.toLocaleString('uk-UA', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  const record = {
+    time: timeStr,
+    workerId: state.worker.id,
+    workerName: state.worker.name,
+    componentId, componentName,
+    count,
+    synced: false
+  };
+  state.scans[bucket].unshift(record);
+  // Обмежуємо історію до 200 останніх щоб не переповнити localStorage
+  if (state.scans[bucket].length > 200) state.scans[bucket].length = 200;
+  persistScans();
+
+  // Запамʼятовуємо кількість для цього процесу — наступного разу автопідставиться
+  if (count > 0 && count < 1000) {
+    state.qtyMemory[componentId] = count;
+    try { localStorage.setItem('scanner_qty_memory', JSON.stringify(state.qtyMemory)); } catch (e) {}
+  }
+
+  updateCounters();
+  if (state.activeTab !== bucket) switchTab(bucket);
+  else renderTable();
+
+  const suffix = count > 1 ? ' ×' + count : '';
+  if (bucket === 'ok') showResult('ok',  '✓ Прийнято: ' + componentName + suffix, state.worker.name + ' • ' + componentId);
+  else                 showResult('bad', '✗ Брак: '     + componentName + suffix, state.worker.name + ' • ' + componentId);
+
+  // Ховаємо стару кнопку undo — покажемо тільки після успішного sendToSheets
+  showUndoButton(false);
+  state.lastAction = null;
+  persistLastAction();
+
+  sendToSheets(record, bucket);
+}
+
+function persistScans() {
+  try { localStorage.setItem('scanner_scans', JSON.stringify(state.scans)); } catch (e) {}
+}
+function persistLastAction() {
+  try {
+    if (state.lastAction) localStorage.setItem('scanner_last_action', JSON.stringify(state.lastAction));
+    else localStorage.removeItem('scanner_last_action');
+  } catch (e) {}
+}
+
+// ==================== Fix panel — виправити останні партії ====================
+
+function openFixPanel() {
+  if (!state.worker) {
+    showResult('err', '⚠ Авторизуйся', 'Скануй бейдж');
+    return;
+  }
+  renderFixPanel();
+  document.getElementById('fix-panel').classList.add('open');
+}
+
+function closeFixPanel() {
+  document.getElementById('fix-panel').classList.remove('open');
+}
+
+function renderFixPanel() {
+  const wrap = document.getElementById('fix-panel-list');
+  // Збираємо всі свої партії з полем serverFirstRow (тобто які реально записалися на сервер)
+  const all = [
+    ...state.scans.ok.map(r => ({ ...r, _type: 'ok' })),
+    ...state.scans.bad.map(r => ({ ...r, _type: 'bad' }))
+  ].filter(r => r.workerId === state.worker.id && r.synced && r.serverFirstRow);
+
+  all.sort((a, b) => (b.time > a.time ? 1 : b.time < a.time ? -1 : 0));
+  const recent = all.slice(0, 10);
+
+  if (!recent.length) {
+    wrap.innerHTML = '<div class="fix-panel-empty">Немає синхронізованих записів для виправлення.</div>';
+    return;
+  }
+
+  wrap.innerHTML = recent.map((r, idx) => {
+    const target = r._type === 'ok' ? 'БРАК' : 'OK';
+    return `<div class="fix-batch">
+      <div class="fix-batch-info">
+        <strong>${esc(r.componentName)}</strong>
+        <span class="fix-batch-status ${r._type}">${r._type === 'ok' ? 'OK' : 'БРАК'}</span>
+        <span class="fix-batch-count">×${r.count || 1}</span>
+      </div>
+      <div class="fix-batch-time">${r.time} • ${r.componentId}</div>
+      <div class="fix-batch-actions">
+        <button class="fix-action move" onclick="fixMove(${idx})">→ Перенести у ${target}</button>
+        <button class="fix-action del" onclick="fixDelete(${idx})">🗑 Видалити</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  state._fixRecent = recent;
+}
+
+async function fixDelete(idx) {
+  const r = state._fixRecent[idx];
+  if (!r) return;
+  const label = (r.count || 1) === 1 ? 'цей запис' : (r.count + ' записів');
+  if (!confirm('Видалити ' + label + ' (' + r.componentName + ')?')) return;
+
+  try {
+    const res = await fetch(state.webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: (r.count || 1) === 1 ? 'delete' : 'undo',
+        sheet: r.serverSheet,
+        row: r.serverFirstRow,
+        firstRow: r.serverFirstRow,
+        count: r.count || 1
+      })
+    });
+    const data = await res.json();
+    if (data.status !== 'ok') throw new Error(data.message);
+
+    const bucket = r._type;
+    const localIdx = state.scans[bucket].findIndex(x => x.serverFirstRow === r.serverFirstRow && x.time === r.time);
+    if (localIdx >= 0) state.scans[bucket].splice(localIdx, 1);
+    persistScans();
+    updateCounters();
+    renderTable();
+    renderFixPanel();
+    showResult('err', '↶ Видалено ' + (r.count || 1) + ' запис(ів)', r.componentName);
+    if (navigator.vibrate) navigator.vibrate(80);
+  } catch (err) {
+    alert('Помилка: ' + err.message);
+  }
+}
+
+async function fixMove(idx) {
+  const r = state._fixRecent[idx];
+  if (!r) return;
+  const from = r._type === 'ok' ? 'Робочі' : 'Брак';
+  const to = r._type === 'ok' ? 'Брак' : 'Робочі';
+  if (!confirm('Перенести ' + (r.count || 1) + ' запис(ів) з ' + from + ' у ' + to + '?')) return;
+
+  try {
+    const res = await fetch(state.webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'move',
+        fromSheet: r.serverSheet,
+        firstRow: r.serverFirstRow,
+        count: r.count || 1
+      })
+    });
+    const data = await res.json();
+    if (data.status !== 'ok') throw new Error(data.message);
+
+    // Локально: переміщуємо у інший bucket
+    const fromBucket = r._type;
+    const toBucket = r._type === 'ok' ? 'bad' : 'ok';
+    const localIdx = state.scans[fromBucket].findIndex(x => x.serverFirstRow === r.serverFirstRow && x.time === r.time);
+    if (localIdx >= 0) {
+      const moved = state.scans[fromBucket].splice(localIdx, 1)[0];
+      // Оновлюємо serverSheet бо тепер на іншому аркуші (нові рядки в кінці іншого аркушу)
+      moved.serverSheet = r._type === 'ok' ? 'Брак' : 'Робочі';
+      // serverFirstRow ми не знаємо точно, але для локальних цілей не критично
+      // fixDelete/fixMove для цього ж запису вдруге може не спрацювати ідеально —
+      // тому користувач має пересинхронізуватись якщо потрібно щось знову виправити
+      moved.serverFirstRow = null;
+      state.scans[toBucket].unshift(moved);
+    }
+    persistScans();
+    updateCounters();
+    renderTable();
+    renderFixPanel();
+    showResult('ok', '→ Перенесено у ' + to, r.componentName + ' ×' + (r.count || 1));
+    if (navigator.vibrate) navigator.vibrate(80);
+  } catch (err) {
+    alert('Помилка: ' + err.message);
+  }
+}
+
+async function undoLast() {
+  if (!state.lastAction) return;
+
+  const btn = document.getElementById('undo-btn');
+  btn.className = 'undo-btn visible pending';
+  btn.textContent = '⏳ Скасовуємо...';
+
+  const action = state.lastAction;
+  try {
+    // Видаляємо з сервера
+    if (state.webhookUrl && action.sheet && action.firstRow) {
+      const res = await fetch(state.webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'undo',
+          sheet: action.sheet,
+          firstRow: action.firstRow,
+          count: action.count
+        })
+      });
+      const data = await res.json();
+      if (data.status !== 'ok') throw new Error(data.message || 'Помилка сервера');
+    }
+
+    // Видаляємо локально: знаходимо запис і забираємо
+    const bucket = action.localBucket;
+    const idx = state.scans[bucket].indexOf(action.record);
+    if (idx >= 0) state.scans[bucket].splice(idx, 1);
+    persistScans();
+
+    updateCounters();
+    renderTable();
+
+    showResult('err', '↶ Скасовано', 'Видалено ' + action.count + ' запис(ів): ' + action.record.componentName);
+    state.lastAction = null;
+    persistLastAction();
+    showUndoButton(false);
+    btn.textContent = '↶ Скасувати останній запис';
+    btn.className = 'undo-btn';
+
+    if (navigator.vibrate) navigator.vibrate(80);
+  } catch (err) {
+    btn.textContent = '↶ Скасувати останній запис';
+    btn.className = 'undo-btn visible';
+    showResult('err', '⚠ Не скасовано', err.message);
+  }
+}
+
+async function sendToSheets(record, type) {
+  if (!state.webhookUrl) return;
+  try {
+    const res = await fetch(state.webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        workerId: record.workerId,
+        componentId: record.componentId,
+        status: type,
+        time: record.time,
+        count: record.count || 1
+      })
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      record.synced = true;
+      record.serverSheet = data.sheet;
+      record.serverFirstRow = data.firstRow;
+      // Готуємо lastAction щоб можна було скасувати
+      state.lastAction = {
+        record,
+        localBucket: type,
+        sheet: data.sheet,
+        firstRow: data.firstRow,
+        count: data.count
+      };
+      persistLastAction();
+      persistScans();
+      showUndoButton(true);
+      renderTable();
+    } else {
+      throw new Error(data.message || 'Помилка сервера');
+    }
+  } catch (err) {
+    showResult('err', '⚠ Помилка синхронізації', err.message);
+  }
+}
+
+function setWorker(id, name) {
+  state.worker = { id, name };
+  localStorage.setItem('scanner_worker', JSON.stringify(state.worker));
+  updateWorkerDisplay();
+  loadSession();
+  updateSessionUI();
+  updateButtonState();
+}
+
+function setCurrentComponent(id, name) {
+  state.currentComponent = { id, name };
+  localStorage.setItem('scanner_current_comp', JSON.stringify(state.currentComponent));
+
+  // Додаємо у "останні процеси" (унікальні, найновіші на початку, максимум 3)
+  state.recentProcesses = [
+    { id, name },
+    ...state.recentProcesses.filter(r => r.id !== id)
+  ].slice(0, 3);
+  localStorage.setItem('scanner_recent_procs', JSON.stringify(state.recentProcesses));
+
+  // Відновлюємо запамʼятовану кількість для цього процесу
+  const rememberedQty = state.qtyMemory[id];
+  if (rememberedQty && rememberedQty > 0 && rememberedQty < 1000) {
+    document.getElementById('qty-input').value = rememberedQty;
+    persistQty();
+  }
+
+  updateComponentDisplay();
+  renderRecentProcesses();
+  updateButtonState();
+}
+
+function renderRecentProcesses() {
+  const bar = document.getElementById('recent-bar');
+  const chips = document.getElementById('recent-chips');
+  if (!bar || !chips) return;
+
+  if (!state.recentProcesses.length) {
+    bar.style.display = 'none';
+    return;
+  }
+  bar.style.display = 'block';
+
+  const currentId = state.currentComponent ? state.currentComponent.id : null;
+  chips.innerHTML = state.recentProcesses.map(r => {
+    const isActive = r.id === currentId;
+    return `<button class="recent-chip${isActive ? ' active' : ''}" onclick="pickRecent('${r.id.replace(/'/g, "\\'")}')">
+      <span class="rc-name">${esc(r.name)}</span>
+      <span class="rc-id">${r.id}</span>
+    </button>`;
+  }).join('');
+}
+
+function pickRecent(id) {
+  const name = state.recentProcesses.find(r => r.id === id)?.name
+            || state.components[id]
+            || state.processes[id];
+  if (!name) return;
+  setCurrentComponent(id, name);
+  showResult('ok', '📋 Обрано: ' + name, 'Тепер тапай OK або БРАК');
+  if (navigator.vibrate) navigator.vibrate(30);
+  // Розбуджуємо камеру якщо була у сплячці
+  if (cameraPhysicallyPaused) resumeCameraPhysical();
+}
+
+// Проста ескейп-функція для HTML у чипсах
+function esc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function clearComponent() {
+  state.currentComponent = null;
+  localStorage.removeItem('scanner_current_comp');
+  updateComponentDisplay();
+  renderRecentProcesses();
+  updateButtonState();
+}
+
+function updateComponentDisplay() {
+  const c = state.currentComponent;
+  const icon = document.getElementById('cc-icon');
+  const name = document.getElementById('cc-name');
+  const id = document.getElementById('cc-id');
+  const clear = document.getElementById('cc-clear');
+  if (c) {
+    icon.textContent = '✓';
+    icon.className = 'cc-icon active';
+    name.textContent = c.name;
+    name.className = 'cc-name';
+    id.textContent = c.id;
+    clear.style.display = 'block';
+  } else {
+    icon.textContent = '?';
+    icon.className = 'cc-icon';
+    name.textContent = 'Скануй ID комплектуючої або процесу';
+    name.className = 'cc-name muted';
+    id.textContent = '';
+    clear.style.display = 'none';
+  }
+}
+
+function updateButtonState() {
+  const ready = state.worker && state.currentComponent;
+  document.getElementById('btn-ok').disabled = !ready;
+  document.getElementById('btn-nok').disabled = !ready;
+}
+
+function logout() {
+  state.worker = null;
+  state.currentComponent = null;
+  state.session = null;
+  state.scans = { ok: [], bad: [] };
+  state.lastAction = null;
+  state.recentProcesses = [];
+  state.qtyMemory = {};
+  localStorage.removeItem('scanner_worker');
+  localStorage.removeItem('scanner_current_comp');
+  localStorage.removeItem('scanner_scans');
+  localStorage.removeItem('scanner_last_action');
+  localStorage.removeItem('scanner_recent_procs');
+  localStorage.removeItem('scanner_qty_memory');
+  showUndoButton(false);
+  updateWorkerDisplay();
+  updateComponentDisplay();
+  updateSessionUI();
+  updateButtonState();
+  updateCounters();
+  renderTable();
+  renderRecentProcesses();
+  showResult('err', 'Сесію завершено', 'Скануй свій бейдж щоб продовжити');
+}
+
+function updateWorkerDisplay() {
+  const w = state.worker;
+  if (w) {
+    const initials = w.name.split(' ').map(s => s[0]).join('').slice(0,2).toUpperCase();
+    document.getElementById('avatar').textContent = initials;
+    document.getElementById('worker-name').textContent = w.name;
+    document.getElementById('worker-id').textContent = w.id;
+    document.getElementById('logout-btn').style.display = 'block';
+  } else {
+    document.getElementById('avatar').textContent = '?';
+    document.getElementById('worker-name').textContent = 'Не авторизовано';
+    document.getElementById('worker-id').textContent = 'Скануй свій бейдж';
+    document.getElementById('logout-btn').style.display = 'none';
+  }
+}
+
+function saveWebhook() {
+  state.webhookUrl = document.getElementById('webhook').value.trim();
+  localStorage.setItem('scanner_webhook', state.webhookUrl);
+  updateStateLine();
+  updateStartMessage();
+  if (state.webhookUrl) syncData();
+}
+
+async function syncData() {
+  if (!state.webhookUrl) { alert('Спочатку введи URL веб-хуку'); return; }
+  const stateEl = document.getElementById('state-line');
+  stateEl.textContent = '⏳ Синхронізація...';
+  stateEl.className = 'state-line';
+  try {
+    const res = await fetch(state.webhookUrl + '?action=sync');
+    const data = await res.json();
+    if (data.status !== 'ok') throw new Error(data.message || 'Помилка сервера');
+    state.workers = data.workers || {};
+    state.components = data.components || {};
+    state.processes = data.processes || {};
+    localStorage.setItem('scanner_workers', JSON.stringify(state.workers));
+    localStorage.setItem('scanner_components', JSON.stringify(state.components));
+    localStorage.setItem('scanner_processes', JSON.stringify(state.processes));
+    fillWorkerDropdown();
+    updateStateLine();
+    stateEl.textContent = '✓ ' + Object.keys(state.workers).length + ' працівників, ' + Object.keys(state.components).length + ' компл., ' + Object.keys(state.processes).length + ' процесів';
+    stateEl.className = 'state-line ok';
+  } catch (err) {
+    stateEl.textContent = '⚠ Помилка: ' + err.message;
+    stateEl.className = 'state-line err';
+  }
+}
+
+function manualLogin() {
+  const block = document.getElementById('manual-login');
+  block.style.display = block.style.display === 'none' ? 'block' : 'none';
+}
+
+function fillWorkerDropdown() {
+  const wSel = document.getElementById('worker-select');
+  const wIds = Object.keys(state.workers).sort();
+  wSel.innerHTML = '<option value="">— Оберіть працівника —</option>' +
+    wIds.map(id => '<option value="' + id + '">' + state.workers[id] + ' (' + id + ')</option>').join('');
+
+  const cSel = document.getElementById('component-select');
+  const compIds = Object.keys(state.components).sort();
+  const procIds = Object.keys(state.processes).sort();
+  let html = '<option value="">— Оберіть позицію —</option>';
+  if (compIds.length) {
+    html += '<optgroup label="Комплектуючі">' +
+      compIds.map(id => '<option value="' + id + '">' + state.components[id] + ' (' + id + ')</option>').join('') +
+      '</optgroup>';
+  }
+  if (procIds.length) {
+    html += '<optgroup label="Процеси">' +
+      procIds.map(id => '<option value="' + id + '">' + state.processes[id] + ' (' + id + ')</option>').join('') +
+      '</optgroup>';
+  }
+  cSel.innerHTML = html;
+}
+
+function updateStateLine() {
+  const el = document.getElementById('state-line');
+  if (!state.webhookUrl) {
+    el.textContent = 'Не налаштовано';
+    el.className = 'state-line';
+  } else {
+    const wc = Object.keys(state.workers).length;
+    const cc = Object.keys(state.components).length;
+    const pc = Object.keys(state.processes).length;
+    if (wc + cc + pc === 0) {
+      el.textContent = '⚠ URL збережено, але немає даних. Натисни "Синхронізувати".';
+      el.className = 'state-line err';
+    } else {
+      el.textContent = '✓ ' + wc + ' прац., ' + cc + ' компл., ' + pc + ' процесів';
+      el.className = 'state-line ok';
+    }
+  }
+}
+
+function showResult(type, title, detail) {
+  const el = document.getElementById('last-result');
+  el.className = 'last-result ' + type;
+  el.querySelector('.lr-title').textContent = title;
+  el.querySelector('.lr-detail').textContent = detail;
+}
+
+function showUndoButton(show) {
+  const btn = document.getElementById('undo-btn');
+  btn.className = 'undo-btn' + (show ? ' visible' : '');
+}
+
+function switchTab(tab) {
+  state.activeTab = tab;
+  try { localStorage.setItem('scanner_active_tab', tab); } catch (e) {}
+  document.getElementById('tab-ok').className  = 'tab' + (tab === 'ok'  ? ' active' : '');
+  document.getElementById('tab-bad').className = 'tab' + (tab === 'bad' ? ' active' : '');
+  renderTable();
+}
+
+function renderTable() {
+  const wrap = document.getElementById('history');
+  const rows = state.scans[state.activeTab];
+  if (!rows.length) { wrap.innerHTML = '<div class="empty">Ще немає записів</div>'; return; }
+  wrap.innerHTML = rows.slice(0, 50).map(r =>
+    '<div class="record">' +
+      '<div class="record-name">' + esc(r.workerName) + (r.count > 1 ? ' <span style="color:#4ade80;font-weight:600;">×' + r.count + '</span>' : '') + '</div>' +
+      '<div class="record-component">' + esc(r.componentName) + ' <span style="color:#666;">(' + r.componentId + ')</span></div>' +
+      '<div class="record-meta">' + r.time + (r.synced ? ' • ☁ синхр.' : ' • ⏳') + '</div>' +
+    '</div>'
+  ).join('');
+}
+
+function updateCounters() {
+  const okTotal = state.scans.ok.reduce((sum, r) => sum + (r.count || 1), 0);
+  const badTotal = state.scans.bad.reduce((sum, r) => sum + (r.count || 1), 0);
+  const notSyncedOk = state.scans.ok.filter(r => !r.synced).reduce((sum, r) => sum + (r.count || 1), 0);
+  const notSyncedBad = state.scans.bad.filter(r => !r.synced).reduce((sum, r) => sum + (r.count || 1), 0);
+  const notSynced = notSyncedOk + notSyncedBad;
+
+  document.getElementById('cnt-total').textContent = okTotal + badTotal;
+  document.getElementById('cnt-ok').textContent    = okTotal;
+  document.getElementById('cnt-bad').textContent   = badTotal;
+
+  // Показуємо попередження про несинхронізовані записи
+  const warnEl = document.getElementById('sync-warning');
+  if (warnEl) {
+    if (notSynced > 0) {
+      warnEl.style.display = 'block';
+      warnEl.textContent = '⚠ ' + notSynced + ' записів не потрапили на сервер. Тап щоб повторити.';
+    } else {
+      warnEl.style.display = 'none';
+    }
+  }
+}
+
+// Повторити спробу для всіх несинхронізованих записів
+async function retryUnsynced() {
+  const all = [
+    ...state.scans.ok.filter(r => !r.synced).map(r => ({ r, type: 'ok' })),
+    ...state.scans.bad.filter(r => !r.synced).map(r => ({ r, type: 'bad' }))
+  ];
+  if (!all.length) return;
+
+  const warnEl = document.getElementById('sync-warning');
+  if (warnEl) warnEl.textContent = '⏳ Повторна спроба...';
+
+  let ok = 0, fail = 0;
+  for (const { r, type } of all) {
+    try {
+      const res = await fetch(state.webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          workerId: r.workerId,
+          componentId: r.componentId,
+          status: type,
+          time: r.time,
+          count: r.count || 1
+        })
+      });
+      const data = await res.json();
+      if (data.status === 'ok') {
+        r.synced = true;
+        r.serverSheet = data.sheet;
+        r.serverFirstRow = data.firstRow;
+        ok++;
+      } else {
+        fail++;
+      }
+    } catch (e) {
+      fail++;
+    }
+  }
+  persistScans();
+  updateCounters();
+  renderTable();
+  showResult('ok', '✓ Відправлено', 'Синхронізовано ' + ok + '/' + all.length + (fail ? ' • ' + fail + ' не вдалось' : ''));
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+let audioCtx = null;
+function beep() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.frequency.value = 1000;
+    gain.gain.value = 0.1;
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.1);
+  } catch(e) {}
+}
+
+// ==================== Session tracking ====================
+
+function loadSession() {
+  if (!state.worker) { state.session = null; return; }
+  const key = 'scanner_session_' + state.worker.id;
+  try {
+    const s = JSON.parse(localStorage.getItem(key) || 'null');
+    state.session = s || { active: false, startTime: null };
+  } catch (e) {
+    state.session = { active: false, startTime: null };
+  }
+}
+
+function saveSession() {
+  if (!state.worker) return;
+  localStorage.setItem('scanner_session_' + state.worker.id, JSON.stringify(state.session));
+}
+
+function updateSessionUI() {
+  const row = document.getElementById('session-row');
+  const dot = document.getElementById('session-dot');
+  const status = document.getElementById('session-status');
+  const time = document.getElementById('session-time');
+  const btn = document.getElementById('session-btn');
+
+  if (!state.worker) { row.style.display = 'none'; return; }
+  row.style.display = 'flex';
+
+  if (state.session && state.session.active) {
+    row.className = 'session-row active';
+    dot.className = 'session-dot active';
+    status.className = 'session-status active';
+    status.textContent = '● Працює';
+    time.textContent = 'з ' + formatStartTime(state.session.startTime);
+    btn.className = 'session-btn stop';
+    btn.textContent = '⏸ Кінець роботи';
+  } else {
+    row.className = 'session-row';
+    dot.className = 'session-dot';
+    status.className = 'session-status';
+    status.textContent = 'Не працює';
+    time.textContent = '';
+    btn.className = 'session-btn start';
+    btn.textContent = '▶ Початок роботи';
+  }
+}
+
+async function toggleSession(forceType) {
+  if (!state.worker) {
+    showResult('err', '⚠ Авторизуйся', 'Скануй бейдж перед початком роботи');
+    return;
+  }
+
+  const wasActive = state.session && state.session.active;
+
+  // Визначаємо дію: forceType має пріоритет, інакше toggle
+  let doStart;
+  if (forceType === 'start') {
+    if (wasActive) return; // Вже працює
+    doStart = true;
+  } else if (forceType === 'stop') {
+    if (!wasActive) return; // Не працює
+    doStart = false;
+  } else {
+    doStart = !wasActive;
+  }
+
+  const now = new Date();
+  const timeStr = now.toLocaleString('uk-UA', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+
+  if (doStart) {
+    state.session = { active: true, startTime: now.toISOString() };
+    showResult('ok', '▶ Початок роботи', state.worker.name);
+  } else {
+    state.session = { active: false, startTime: null };
+    showResult('bad', '⏸ Кінець роботи', state.worker.name);
+  }
+  saveSession();
+  updateSessionUI();
+
+  if (navigator.vibrate) navigator.vibrate(80);
+  beep();
+
+  if (state.webhookUrl) {
+    try {
+      await fetch(state.webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'session',
+          workerId: state.worker.id,
+          type: doStart ? 'start' : 'stop',
+          time: timeStr
+        })
+      });
+    } catch (err) {
+      showResult('err', '⚠ Не синхронізовано', err.message);
+    }
+  }
+}
+
+function formatStartTime(iso) {
+  const d = new Date(iso);
+  return d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatSessionDuration(ms) {
+  const totalSec = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSec / 3600);
+  const minutes = Math.floor((totalSec % 3600) / 60);
+  const seconds = totalSec % 60;
+  return hours + ':' + String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0');
+}
+</script>
+
+</body>
+</html>
