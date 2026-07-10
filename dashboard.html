@@ -107,7 +107,17 @@
 
   <div class="topbar">
     <h1>📊 Аналітика перевірки</h1>
-    <div class="actions">
+    <div class="actions" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span id="last-updated" style="font-size:12px;color:#666;"></span>
+      <label style="font-size:12px;color:#666;">Автооновлення:
+        <select id="auto-refresh" onchange="setAutoRefresh(this.value)" style="padding:4px 8px;border-radius:6px;border:1px solid #ccc;background:#fff;font-size:12px;margin-left:4px;">
+          <option value="0">Вимкнено</option>
+          <option value="60">Кожну хвилину</option>
+          <option value="300" selected>Кожні 5 хв</option>
+          <option value="600">Кожні 10 хв</option>
+          <option value="1800">Кожні 30 хв</option>
+        </select>
+      </label>
       <button class="btn" onclick="loadData()">🔄 Оновити</button>
       <button class="btn" onclick="exportCSV()">⬇ Експорт CSV</button>
     </div>
@@ -210,14 +220,22 @@ function updateSettingsStatus() {
   }
 }
 
-async function loadData() {
+async function loadData(silent) {
   if (!state.webhookUrl) {
-    alert('Спочатку введи URL веб-хуку');
+    if (!silent) alert('Спочатку введи URL веб-хуку');
     return;
   }
-  document.getElementById('content').innerHTML = '<div class="loading">⏳ Завантаження даних...</div>';
+  const contentEl = document.getElementById('content');
+  const wasLoaded = contentEl && !contentEl.querySelector('.loading');
+  if (!silent && !wasLoaded) {
+    contentEl.innerHTML = '<div class="loading">⏳ Завантаження даних...</div>';
+  }
+  // Візуальний індикатор під час автооновлення — заголовок мерехтить
+  const lastEl = document.getElementById('last-updated');
+  if (silent && lastEl) lastEl.textContent = '⏳ Оновлення...';
+
   try {
-    const res = await fetch(state.webhookUrl + '?action=records&limit=5000');
+    const res = await fetch(state.webhookUrl + '?action=records&limit=50000');
     const data = await res.json();
     if (data.status !== 'ok') throw new Error(data.message || 'Помилка');
     state.records.ok  = data.ok  || [];
@@ -228,11 +246,51 @@ async function loadData() {
     state.departments = data.departments || {};
     state.components = data.components || {};
     state.processes  = data.processes  || {};
+    state.lastLoadedAt = Date.now();
     fillFilters();
     render();
+    updateLastUpdatedText();
   } catch (err) {
-    document.getElementById('content').innerHTML = '<div class="empty">⚠ Помилка завантаження: ' + err.message + '</div>';
+    if (!silent) {
+      document.getElementById('content').innerHTML = '<div class="empty">⚠ Помилка завантаження: ' + err.message + '</div>';
+    }
+    if (lastEl) lastEl.textContent = '⚠ Помилка синхронізації';
   }
+}
+
+// ── Автооновлення ──
+let autoRefreshTimer = null;
+
+function setAutoRefresh(seconds) {
+  seconds = parseInt(seconds) || 0;
+  localStorage.setItem('dashboard_auto_refresh', String(seconds));
+  if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+  if (seconds > 0) {
+    autoRefreshTimer = setInterval(() => loadData(true), seconds * 1000);
+  }
+}
+
+function updateLastUpdatedText() {
+  const el = document.getElementById('last-updated');
+  if (!el || !state.lastLoadedAt) return;
+  const secs = Math.floor((Date.now() - state.lastLoadedAt) / 1000);
+  let text;
+  if (secs < 5) text = '✓ Щойно оновлено';
+  else if (secs < 60) text = '✓ ' + secs + ' сек тому';
+  else if (secs < 3600) text = '✓ ' + Math.floor(secs / 60) + ' хв тому';
+  else text = '✓ ' + Math.floor(secs / 3600) + ' год тому';
+  el.textContent = text;
+}
+
+// Оновлюємо напис "N хв тому" кожні 10 сек
+setInterval(updateLastUpdatedText, 10000);
+
+// Ініціалізація автооновлення з попереднього значення
+const savedAutoRefresh = parseInt(localStorage.getItem('dashboard_auto_refresh') || '300');
+const autoRefreshSelect = document.getElementById('auto-refresh');
+if (autoRefreshSelect) {
+  autoRefreshSelect.value = String(savedAutoRefresh);
+  setAutoRefresh(savedAutoRefresh);
 }
 
 function fillFilters() {
